@@ -1,0 +1,11 @@
+[Unit]
+Description=Instagram hashtag runner
+
+[Service]
+Type=oneshot
+WorkingDirectory=/ABSOLUTE/PATH/instagram-runner
+ExecStart=/ABSOLUTE/PATH/instagram-runner/.venv/bin/python /ABSOLUTE/PATH/instagram-runner/runner.py run -u YOUR_USERNAME --hashtags photography --execute --max-follows 10 --likes 3 --max-likes 30
+UMask=0077
+TimeoutStartSec=2h
+Restart=no
+

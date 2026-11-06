@@ -1,0 +1,6 @@
+Validated on Linux with Python 3.12.14 and instagrapi 3.2.6.
+13 tests passed: python -m unittest -v
+Includes simulated challenge/timeout, cross-run duplicate handling, rolling limits,
+existing-follow exclusion, write replay prevention, session permissions,
+and installed-library method signatures.
+No live Instagram login, follow, like, or scheduled run was performed.

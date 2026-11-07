@@ -143,3 +143,16 @@ enabled automatically by this download.
 
 This is a local deliverable, not a new GitHub repository. No account was accessed,
 followed or liked during development, and no background schedule was enabled.
+
+## Interactive aiograpi login (Windows / Surface, recommended)
+
+The GitHub Actions login test can install the client, but **cannot privately answer Instagram's live email/SMS challenge** and must not be repeatedly retried. The tested GitHub development revision used here fixes the released package's missing password-key handling. It may still be rejected by Instagram.
+
+1. On a **trusted Windows computer**, download this repository using **Code → Download ZIP**, and extract it into a local folder. Do not upload it to a shared folder.
+2. Install **Python 3.12** if missing, ensuring the Windows `py` launcher is installed.
+3. Double-click **`login_windows.cmd`** in the extracted repository. The script creates a separate Python environment and installs a pinned version of `aiograpi` directly from GitHub. It does **not** use any proxy.
+4. Enter your Instagram username/password privately in the terminal. If prompted, enter the **current, unexpired verification code** in that same terminal—not in chat, GitHub Actions inputs or issues.
+5. Only success after the authenticated `account_info` read is reported as a pass. The session is saved at `%USERPROFILE%\\.instagram_runner\\aiograpi-session.json` and must be treated like a password.
+
+**Security:** Never commit, upload, paste, or email the session file or any 2FA code. The script does not enable automated likes/follows, and successful login alone does not prove that recent hashtag retrieval works. Complete any Instagram security challenge in the official app, and do not repeatedly retry rejected logins.
+

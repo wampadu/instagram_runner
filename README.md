@@ -1,3 +1,31 @@
+## WORKING FREE SOLUTION (November 2026): Instagram web Recent posts, no Meta app
+
+**Use this instead of the older Android `aiograpi.hashtag_medias_recent` or a paid data provider.** Tested live on a Pixel 9 Pro using only its pre-existing private local Termux session. No Meta developer account, no Graph API key, no credit card, no other registration. No like/follow actions.
+
+The key discovery is a **different Instagram web endpoint** from the old broken Android-mobile private API. This approach was adapted from [vrajdesai78/instagram-skill](https://github.com/vrajdesai78/instagram-skill), using `POST https://www.instagram.com/api/v1/tags/{tag}/sections/` with `supported_tabs=["top","recent","clips"]`, `tab=recent`, existing Instagram cookies and web headers. Only the local phone sends the cookies to instagram.com; they are never written to GitHub or printed.
+
+Run in Termux:
+
+```bash
+cd ~/instagram_runner
+git pull --ff-only
+bash recent_web_termux.sh follow_for_follow 168
+bash recent_web_termux.sh followforfollow 24
+```
+
+The command outputs exact caption-hashtag matches in timestamp order, with profile names, publication ages and post URLs. The number is the maximum age in hours. Defaults: 2 pages; bounded to at most 3 pages, no automatic retries, no external services. Python entrypoint: `python -m scripts.instagram_web_recent <tag> --hours 24 --max-pages 2` inside `venv-instagrapi`.
+
+**Actual live results on 2026-11-06 / Nov 7 UTC:**
+
+- `#follow_for_follow`: 2 Recent web API pages, both HTTP 200, **57 raw media candidates**, **51 matched exact hashtag captions**, **4 posts within 7 days**. Newest verified was about **30.6 hours old**; **zero under 24 hours in sampled pages**. This is not evidence the hashtag has zero new posts overall.
+- `#toronto`: recent web API returned verified exact-caption posts published within **minutes** (some around 0.2–0.6 hours).
+- `#followforfollow` (no underscores): verified exact-tag posts also published within **an hour**. This is a different hashtag from `#follow_for_follow`.
+- `test_instagram_web_recent_probe.py` (2 offline tests) and `test_instagram_web_recent.py` (3 offline tests) passed on the phone.
+
+**Limitations:** Instagram may rank/filter results even when `tab=recent`; sorting retrieved posts by timestamp does not make a globally exhaustive chronological feed. The exact `#follow_for_follow` tag may have low discoverability or few current results. API access is undocumented and can change, expire, or rate-limit; do not claim guaranteed unlimited queries. This script deliberately performs zero account mutations and has no auto-follow/auto-like behavior. Session stays only in `/root/.instagram_runner/aiograpi-session.json` and should never be pasted or committed.
+
+---
+
 # Instagram runner for Linux
 
 This is a rewrite of the supplied hashtag-follow-and-like script using instagrapi 3.2.6

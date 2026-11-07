@@ -98,11 +98,11 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("hashtag",nargs="?",default="follow_for_follow")
     p.add_argument("--max-pages",type=int,default=2,choices=(1,2,3))
-    p.add_argument("--hours",type=int,default=168)
+    p.add_argument("--hours",type=int,default=0,help="Optional maximum age; 0 (default) keeps all verified posts")
     args=p.parse_args()
     tag=args.hashtag.lower().lstrip("#")
-    if not TAG.fullmatch(tag) or not 1<=args.hours<=168:
-        p.error("One valid hashtag and age window of 1-168 hours")
+    if not TAG.fullmatch(tag) or not 0<=args.hours<=100000:
+        p.error("One valid hashtag; optional age must be zero or a positive number")
     try:
         http=load_http()
         matches,pages=retrieve(http,tag,args.max_pages)
@@ -113,14 +113,15 @@ def main():
     print("Free source: authenticated Instagram web endpoint, no Meta API key")
     print("Pages:",len(pages),"HTTP statuses:",[x["http"] for x in pages])
     print("Candidates:",sum(x["raw"] for x in pages),"Exact-caption-tag posts:",len(matches))
-    within=[m for m in matches if m["age"]<=args.hours]
-    print(f"Verified posts within {args.hours}h:",len(within))
+    within=matches if args.hours==0 else [m for m in matches if m["age"]<=args.hours]
+    label="All verified posts (newest to oldest)" if args.hours==0 else f"Verified posts within {args.hours}h (newest to oldest)"
+    print(label+":",len(within))
     for m in within[:30]:
         print(f"@{m['username']} | {m['age']:.2f}h | https://www.instagram.com/p/{m['code']}/")
     if not within:
         if matches:
             print("Newest verified accessible post:",matches[0]["age"],"hours ago")
-        print("Instagram returned no exact-tag posts within that age in this sample.")
+        print("No exact-tag posts match this query in the sampled pages.")
     if pages and pages[-1]["has_more"] and pages[-1]["cursor"]:
         print("Further pages may be available; completeness NOT guaranteed.")
     print("No like/follow/comment, no secret printed, no session uploaded.")

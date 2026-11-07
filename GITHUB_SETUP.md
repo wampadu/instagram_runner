@@ -62,3 +62,13 @@ a different workflow design; the included Instagram workflow deliberately uses
 the persistent Linux machine instead.
 
 Reference: https://docs.github.com/en/actions/concepts/runners/self-hosted-runners
+
+## Fix repository write access
+
+Authorizing the connector under Authorized GitHub Apps is different from installing
+it for a repository. If writes fail with `403: Resource not accessible by integration`,
+open https://github.com/apps/chatgpt-codex-connector/installations/select_target,
+choose Only select repositories, select this repository, and complete Install &
+Authorize. Review the displayed code and workflow write permissions. Installation
+can be reviewed later under GitHub Settings > Applications > Installed GitHub Apps.
+Making a repository public only enables public reads; it does not grant writes.

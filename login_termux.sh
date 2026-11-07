@@ -13,7 +13,7 @@ fi
 # from standard Linux wheels. Keep the environment isolated but allow
 # Termux's pre-built site packages to be visible.
 pkg update -y
-pkg install -y python git python-pillow clang make pkg-config libffi openssl rust
+pkg install -y python python-pillow
 mkdir -p "$HOME/.instagram_runner"
 chmod 700 "$HOME/.instagram_runner"
 python -m venv --system-site-packages "$HOME/.instagram_runner/venv"

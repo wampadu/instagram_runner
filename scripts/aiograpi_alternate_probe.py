@@ -28,8 +28,9 @@ async def main():
     print("Auth: PASS; no login attempted")
     query="torontophotography"
     try:
-        users=await asyncio.wait_for(client.search_users(query,count=5),timeout=40)
-        print("Accounts search count:",len(users))
+        users=await asyncio.wait_for(client.search_users(query),timeout=40)
+        users=users[:5]
+        print("Accounts search count (first 5):",len(users))
     except Exception as e:
         users=[]
         print("Accounts search:",type(e).__name__)

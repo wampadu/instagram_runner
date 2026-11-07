@@ -1,6 +1,7 @@
-name: Instagram - follow and like N posts (variable-controlled)
+name: Instagram - rotate 5 hashtags every 20 likes
 
-# Manual test; no schedule. IG_LIKE_COUNT is a repository Actions variable.
+# Manual run, with IG_LIKE_COUNT as the total target (1-100).
+# Each group of 20 confirmed likes switches to the next hashtag.
 on:
   workflow_dispatch:
     inputs:
@@ -12,11 +13,6 @@ on:
           - preview
           - follow_like
         default: preview
-      hashtag:
-        description: 'Exact hashtag; newest verified posts first'
-        required: true
-        type: string
-        default: followforfollow
 
 permissions:
   contents: read
@@ -27,9 +23,9 @@ concurrency:
 
 jobs:
   follow-and-like-test:
-    name: Follow and like IG_LIKE_COUNT authors/posts
+    name: Follow and like IG_LIKE_COUNT, switching hashtag each 20 confirmed likes
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,7 +40,6 @@ jobs:
         continue-on-error: true
         env:
           RUN_MODE: ${{ inputs.mode }}
-          IG_HASHTAG: ${{ inputs.hashtag }}
           IG_LIKE_COUNT: ${{ vars.IG_LIKE_COUNT || '2' }}
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
           IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
@@ -53,7 +48,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/instagram-follow-like-test"
           python -m scripts.like_posts_variable \
             --mode "$RUN_MODE" \
-            --hashtag "$IG_HASHTAG" \
             --count "$IG_LIKE_COUNT" \
             --max-pages 3 \
             --output-dir "$RUNNER_TEMP/instagram-follow-like-test"

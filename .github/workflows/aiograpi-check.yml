@@ -1,6 +1,10 @@
 name: aiograpi compatibility check
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/aiograpi-check.yml'
   workflow_dispatch:
     inputs:
       test_login:
@@ -43,7 +47,7 @@ jobs:
           print("Login parameters:", ", ".join(inspect.signature(Client.login).parameters))
           PY
       - name: One real login and authenticated read (no proxy, no writes)
-        if: ${{ inputs.test_login }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.test_login) || (github.event_name == 'push' && github.event.head_commit.message == 'One-shot awaited aiograpi login validation') }}
         env:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}

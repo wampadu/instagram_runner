@@ -78,7 +78,7 @@ def check_target_media(media, code, tag, expected_user=None):
         "media_id": media_id,
         "code": code,
         "age_hours": round(age, 2),
-        "url": f"https://instagram.com{code}/",
+        "url": f"https://www.instagram.com/p/{code}/",
     }
 
 @contextmanager
@@ -128,122 +128,198 @@ def make_client(session_path):
         raise SafeStop("Saved session belongs to an unexpected Instagram account.")
     return cl
 def execute_single_engagement(client, code, tag, expected_user=None):
-    """Performs random delays and runs structural validation before hitting follow/like endpoints."""
-    result = {"follow": "not_attempted", "like": "not_attempted"}
+    """Attempt one verified NEW follow+like pair; never retry uncertain writes."""
+    result = {"follow": "not_attempted", "like": "not_attempted",
+              "code": code, "hashtag": tag}
     try:
         media_pk = client.media_pk_from_code(code)
         media = client.media_info(media_pk, use_cache=False)
         target = check_target_media(media, code, tag, expected_user)
-        result.update({k:v for k,v in target.items() if k not in ("uid","media_id")})
+        result["username"] = target["username"]
+        result["url"] = target["url"]
+        if str(client.user_id) == target["uid"]:
+            result["status"] = "own_post_skipped"
+            return result, False
+        # Both actions must be genuinely new.
+        if getattr(media, "has_liked", None) is True:
+            result["status"] = "already_liked"
+            return result, False
+        if getattr(media, "has_liked", None) is not False:
+            result["status"] = "like_state_unknown"
+            return result, False
+        relationship = client.user_friendship_v1(target["uid"])
+        if relationship is None:
+            raise SafeStop("Follow state unavailable.")
+        if (getattr(relationship, "following", False)
+                or getattr(relationship, "outgoing_request", False)):
+            result["status"] = "already_following_or_requested"
+            return result, False
+    except SafeStop as exc:
+        result["status"] = "verification_skipped"
+        result["reason"] = str(exc)
+        return result, False
     except Exception as exc:
-        result["error"] = "Post verification failed: " + type(exc).__name__
+        result["status"] = "read_skipped"
+        result["reason"] = type(exc).__name__
         return result, False
 
-    # Execute Follow Action (1-30s Delay)
     try:
-        if str(client.user_id) == target["uid"]:
+        time.sleep(random.uniform(1, 30))
+        if client.user_follow(target["uid"]) is not True:
+            result["follow"] = "unconfirmed"
+            result["error"] = "Instagram did not confirm the follow."
             return result, False
-        rel = client.user_friendship_v1(target["uid"])
-        if rel is None or bool(getattr(rel,"following",False)) or bool(getattr(rel,"outgoing_request",False)):
-            result["follow"] = "already_following_or_requested"
-        else:
-            delay = random.randint(1, 30)
-            print(f"Delaying {delay}s before following @{target['username']}...")
-            time.sleep(delay)
-            if client.user_follow(target["uid"]) is True:
-                result["follow"] = "confirmed"
+        result["follow"] = "confirmed"
     except Exception as exc:
-        result["follow"] = "failed"
+        result["follow"] = "uncertain"
+        result["error"] = "Follow outcome uncertain (" + type(exc).__name__ + ")."
+        return result, False
 
-    # Execute Like Action (1-30s Delay)
-    action_success = False
     try:
-        if getattr(media, "has_liked", None) is True:
-            result["like"] = "already_liked"
-        else:
-            delay = random.randint(1, 30)
-            print(f"Delaying {delay}s before liking post {code}...")
-            time.sleep(delay)
-            if client.media_like(target["media_id"]) is True:
-                result["like"] = "confirmed"
-                action_success = True
+        time.sleep(random.uniform(1, 30))
+        if client.media_like(target["media_id"]) is not True:
+            result["like"] = "unconfirmed"
+            result["error"] = "Instagram did not confirm the like."
+            return result, False
+        result["like"] = "confirmed"
+        result["status"] = "confirmed"
+        return result, True
     except Exception as exc:
-        result["like"] = "failed"
-        
-    return result, action_success
-
+        result["like"] = "uncertain"
+        result["error"] = "Like outcome uncertain (" + type(exc).__name__ + ")."
+        return result, False
 def fetch_feed_candidates(session_path, hashtag, max_pages=2):
-    """Harvests target candidates using the unauthenticated recent web parser."""
-    try:
-        http = load_http(session_path)
-        records, _ = retrieve(http, hashtag, max_pages=max_pages)
-        return sorted((c for c in records if c["age"] >= 0), key=lambda c: c["age"])
-    except Exception:
-        return []
-
+    """Get verified hashtag posts; do not silently treat fetch errors as zero."""
+    http = load_http(session_path)
+    records, pages = retrieve(http, hashtag, max_pages=max_pages)
+    if not pages or any(p.get("http") != "200" for p in pages):
+        raise SafeStop("Hashtag discovery unavailable for #" + hashtag + ".")
+    distinct = {}
+    for item in records:
+        code, age = item.get("code"), item.get("age")
+        if (isinstance(code, str) and isinstance(age, (int, float))
+                and age >= 0 and (code not in distinct or age < distinct[code]["age"])):
+            distinct[code] = item
+    return sorted(distinct.values(), key=lambda item: item["age"])
 def run(args):
-    print(f"Starting automation. Target goal: {args.target_count} interactions.")
-    
-    current_pool = list(HASHTAG_POOL)
-    if args.hashtag in current_pool:
-        current_pool.remove(args.hashtag)
-    current_pool.insert(0, args.hashtag)
-    
-    hashtag_index = 0
-    total_successful_likes = 0
-    engagement_history = []
-    
+    """Work in blocks of 20 verified pairs; stop on shortfall without fake counts."""
+    count = args.target_count
+    report = {
+        "requested": count, "confirmed_likes": 0, "confirmed_follows": 0,
+        "batches": [], "results": [], "skipped": 0, "error": None,
+    }
     try:
+        if not isinstance(count, int) or not 1 <= count <= 100:
+            raise SafeStop("Target count must be between 1 and 100.")
+        if not TAG.fullmatch(args.hashtag):
+            raise SafeStop("Invalid starting hashtag.")
+        current_pool = [args.hashtag] + [t for t in HASHTAG_POOL if t != args.hashtag]
         with private_session_path() as session_path:
             client = make_client(session_path)
-            
-            while total_successful_likes < args.target_count:
-                hashtag_index = (total_successful_likes // 20) % len(current_pool)
-                active_hashtag = current_pool[hashtag_index]
-                
-                print(f"\n--- Active Feed Target: #{active_hashtag} (Progress: {total_successful_likes}/{args.target_count}) ---")
-                candidates = fetch_feed_candidates(session_path, active_hashtag, args.max_pages)
-                
-                if not candidates:
-                    print(f"Feed context for #{active_hashtag} empty or rate limited. Cycling up early.")
-                    total_successful_likes = ((total_successful_likes // 20) + 1) * 20
-                    continue
-                
-                acted_in_this_batch = False
-                for target_item in candidates:
-                    if total_successful_likes >= args.target_count:
+            seen_posts, seen_authors = set(), set()
+            remaining = count
+            for tag in current_pool:
+                if remaining <= 0:
+                    break
+                quota = min(20, remaining)
+                batch = {
+                    "hashtag": tag, "requested": quota,
+                    "confirmed_likes": 0, "confirmed_follows": 0,
+                    "available": 0,
+                }
+                report["batches"].append(batch)
+                try:
+                    candidates = fetch_feed_candidates(
+                        session_path, tag, args.max_pages
+                    )
+                except SafeStop:
+                    raise
+                except Exception as exc:
+                    raise SafeStop(
+                        f"Feed read failed for #{tag} ({type(exc).__name__})."
+                    ) from None
+                batch["available"] = len(candidates)
+                for p in candidates:
+                    if batch["confirmed_likes"] >= quota:
                         break
-                        
-                    code = target_item.get("code")
-                    username = target_item.get("username")
-                    if not code or not username or not USER_RE.fullmatch(username):
+                    code, username = p.get("code"), p.get("username")
+                    if (not isinstance(code, str) or not isinstance(username, str)
+                            or not USER_RE.fullmatch(username)
+                            or code in seen_posts or username.lower() in seen_authors):
+                        report["skipped"] += 1
                         continue
-                        
-                    res_log, success = execute_single_engagement(client, code, active_hashtag, expected_user=username)
-                    engagement_history.append(res_log)
-                    
-                    if success:
-                        total_successful_likes += 1
-                        acted_in_this_batch = True
-                        print(f"Successfully processed engagement pair. Total counter: {total_successful_likes}")
-                
-                if not acted_in_this_batch:
-                    print("No fresh interactive candidates left in this batch. Advancing hashtag tier.")
-                    total_successful_likes = ((total_successful_likes // 20) + 1) * 20
-
+                    seen_posts.add(code)
+                    seen_authors.add(username.lower())
+                    result, succeeded = execute_single_engagement(
+                        client, code, tag, expected_user=username
+                    )
+                    report["results"].append(result)
+                    if result.get("follow") == "confirmed":
+                        report["confirmed_follows"] += 1
+                        batch["confirmed_follows"] += 1
+                    if result.get("like") == "confirmed":
+                        report["confirmed_likes"] += 1
+                        batch["confirmed_likes"] += 1
+                    if result.get("error"):
+                        raise SafeStop(
+                            "One write was unconfirmed for #" + tag +
+                            "; stopped without retry."
+                        )
+                    if not succeeded:
+                        report["skipped"] += 1
+                if batch["confirmed_likes"] < quota or batch["confirmed_follows"] < quota:
+                    raise SafeStop(
+                        f"Only {batch['confirmed_likes']}/{quota} new likes and "
+                        f"{batch['confirmed_follows']}/{quota} new follows on #{tag}. "
+                        "The next hashtag was not started."
+                    )
+                remaining -= quota
     except SafeStop as exc:
-        print(f"Stopped safely: {exc}")
+        report["error"] = str(exc)
     except Exception as exc:
-        print(f"Unexpected termination: {type(exc).__name__}")
-        
-    print(f"\nAutomation cycle concluded. Completed actions: {total_successful_likes}")
-    return 0
+        report["error"] = "Stopped (" + type(exc).__name__ + ")."
 
+    if args.output_dir:
+        target = Path(args.output_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "results.json").write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8"
+        )
+        summary_lines = [
+            "# Instagram engagement cycle", "",
+            f"- Requested new follow+like pairs: {report['requested']}",
+            f"- Confirmed new follows: {report['confirmed_follows']}",
+            f"- Confirmed new likes: {report['confirmed_likes']}",
+            f"- Skipped: {report['skipped']}", "",
+            "| Hashtag | Target | New follows | New likes | Candidates |",
+            "|---|---:|---:|---:|---:|",
+        ]
+        for batch in report["batches"]:
+            summary_lines.append(
+                f"| #{batch['hashtag']} | {batch['requested']} "
+                f"| {batch['confirmed_follows']} | {batch['confirmed_likes']} "
+                f"| {batch['available']} |"
+            )
+        if report["error"]:
+            summary_lines.append("\n**Stopped:** " + report["error"])
+        summary = "\n".join(summary_lines) + "\n"
+        (target / "results.md").write_text(summary, encoding="utf-8")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+                out.write(summary)
+    print(
+        f"Requested={count} confirmed_follows={report['confirmed_follows']} "
+        f"confirmed_likes={report['confirmed_likes']} skipped={report['skipped']}"
+    )
+    if report["error"]:
+        print("Stopped:", report["error"])
+        return 2
+    return 0
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--hashtag", default="follow_for_follow")
-    p.add_argument("--target-count", type=int, default=5)
-    p.add_argument("--max-pages", type=int, default=3)
+    p.add_argument("--hashtag", default="followforfollow")
+    p.add_argument("--target-count", type=int, default=2)
+    p.add_argument("--max-pages", type=int, choices=(1, 2, 3), default=3)
     p.add_argument("--output-dir", default="")
     args = p.parse_args()
     args.hashtag = args.hashtag.lower().lstrip("#")

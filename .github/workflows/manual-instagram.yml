@@ -1,4 +1,4 @@
-name: Instagram manual: newest-first preview / one follow and like
+name: 'Instagram manual — newest-first preview / one follow and like'
 
 # MANUAL ONLY: no cron, push, or pull_request trigger.
 on:

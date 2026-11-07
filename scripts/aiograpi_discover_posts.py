@@ -33,7 +33,7 @@ def caption_contains_hashtag(caption, tag):
     # Word-boundary excludes other digits/letters/underscore and Unicode letters.
     if not isinstance(caption, str):
         return False
-    return bool(re.search(r"(?<!\\w)#" + re.escape(tag) + r"(?!\\w)", caption, re.I))
+    return bool(re.search(r"(?<!\w)#" + re.escape(tag) + r"(?!\w)", caption, re.I))
 
 
 def verified_post(media, tag, max_hours, now=None):

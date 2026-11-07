@@ -234,7 +234,6 @@ def parse_args():
     parser.add_argument("--max-pages", type=int, choices=[1, 2, 3], default=3)
     parser.add_argument("--output-dir", default="")
     args = parser.parse_args()
-    args.hashtag = args.hashtag.lower().lstrip("#")
     return args
 
 

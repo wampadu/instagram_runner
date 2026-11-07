@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -47,53 +48,4 @@ jobs:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
           IG_2FA_CODE: ${{ secrets.IG_2FA_CODE }}
-        shell: bash
-        run: |
-          python - <<'PY'
-          import asyncio
-          import contextlib
-          import io
-          import logging
-          import os
-          import sys
-
-          logging.disable(logging.CRITICAL)
-          username = os.environ.get("IG_USERNAME", "").strip().lstrip("@")
-          password = os.environ.get("IG_PASSWORD", "")
-          code = os.environ.get("IG_2FA_CODE", "").strip()
-          if not username or not password:
-              print("Configuration error: missing IG_USERNAME or IG_PASSWORD")
-              sys.exit(1)
-
-          stage = "client initialization"
-
-          async def verify_login():
-              global stage
-              from aiograpi import Client
-              client = Client()
-              if hasattr(client, "with_challenge_flow"):
-                  client.with_challenge_flow = False
-              stage = "await login"
-              result = await client.login(username, password, verification_code=code)
-              if result is not True:
-                  raise RuntimeError("Login did not confirm success")
-              stage = "verify user ID"
-              if not getattr(client, "user_id", None):
-                  raise RuntimeError("No authenticated user ID")
-              stage = "authenticated account_info"
-              info = await client.account_info()
-              if getattr(info, "username", "").lower() != username.lower():
-                  raise RuntimeError("Account verification mismatch")
-
-          try:
-              with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                  asyncio.run(verify_login())
-          except Exception as exc:
-              print("Failed stage:", stage)
-              print("Error class:", type(exc).__name__)
-              print("No automatic retry. Resolve any Instagram verification request in the official app.")
-              print("No likes, follows, or hashtag reads were performed.")
-              sys.exit(1)
-          print("PASS: awaited login and authenticated account-info request both succeeded.")
-          print("No proxy, likes, follows, hashtag reads, or session export.")
-          PY
+        run: python scripts/aiograpi_login_check.py

@@ -1,0 +1,52 @@
+name: One-time original Instagram one-follow-one-like repeat
+
+# Temporary live test running the ORIGINAL manual script unchanged.
+# Only the initial creation commit can run it, no recurring schedule.
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-manual-ig-repeat.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instagram-manual-one-account
+  cancel-in-progress: false
+
+jobs:
+  one-follow-one-like:
+    if: github.event.head_commit.message == 'Trigger one original Instagram one-person live repeat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Offline checks
+        run: python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent test_manual_instagram_actions
+      - name: LIVE - original manual one follow and one like
+        env:
+          IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
+          IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ig-manual-repeat"
+          python -m scripts.manual_instagram_actions \
+            --mode follow_like \
+            --hashtag follow_for_follow \
+            --post-url "" \
+            --max-pages 2 \
+            --confirm FOLLOW_AND_LIKE \
+            --output-dir "$RUNNER_TEMP/ig-manual-repeat"
+      - name: Upload verified live result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-manual-live-repeat-${{ github.run_id }}
+          path: ${{ runner.temp }}/ig-manual-repeat/
+          if-no-files-found: warn
+          retention-days: 7

@@ -26,6 +26,10 @@ POST_URL_RE = re.compile(
 )
 USER_RE = re.compile(r"^[A-Za-z0-9_.]{1,30}$")
 
+COOLDOWN_AFTER_PAIRS = 50
+COOLDOWN_MIN_SECONDS = 10 * 60
+COOLDOWN_MAX_SECONDS = 13 * 60
+
 HASHTAG_POOL = [
     "followforfollow",
     "likeforlike",
@@ -210,7 +214,7 @@ def run(args):
     count = args.target_count
     report = {
         "requested": count, "confirmed_likes": 0, "confirmed_follows": 0,
-        "batches": [], "results": [], "skipped": 0, "error": None,
+        "batches": [], "results": [], "cooldowns": [], "skipped": 0, "error": None,
     }
     try:
         if not isinstance(count, int) or not 1 <= count <= 100:
@@ -288,6 +292,26 @@ def run(args):
                             )
                         if succeeded:
                             progress_in_pass += 1
+                            # Count only confirmed NEW follow+like pairs.
+                            # Do not delay after the final requested pair.
+                            if (report["confirmed_likes"] % COOLDOWN_AFTER_PAIRS == 0
+                                    and report["confirmed_likes"] < count):
+                                seconds = random.uniform(
+                                    COOLDOWN_MIN_SECONDS, COOLDOWN_MAX_SECONDS
+                                )
+                                cooldown = {
+                                    "after_confirmed_pairs": report["confirmed_likes"],
+                                    "seconds": round(seconds, 1),
+                                    "status": "started",
+                                }
+                                report["cooldowns"].append(cooldown)
+                                print(
+                                    f"Cooldown after {report['confirmed_likes']} "
+                                    f"confirmed pairs: {seconds / 60:.2f} minutes",
+                                    flush=True,
+                                )
+                                time.sleep(seconds)
+                                cooldown["status"] = "completed"
                         else:
                             report["skipped"] += 1
                             batch["skipped"] += 1
@@ -327,7 +351,8 @@ def run(args):
             f"- Requested new follow+like pairs: {report['requested']}",
             f"- Confirmed new follows: {report['confirmed_follows']}",
             f"- Confirmed new likes: {report['confirmed_likes']}",
-            f"- Skipped: {report['skipped']}", "",
+            f"- Skipped: {report['skipped']}",
+            f"- Cooldowns taken: {len(report['cooldowns'])}", "",
             "| Pass | Hashtag | Target | New follows | New likes | Candidates | Status |",
             "|---:|---|---:|---:|---:|---:|---|",
         ]
@@ -336,6 +361,12 @@ def run(args):
                 f"| {batch['pass']} | #{batch['hashtag']} | {batch['requested']} "
                 f"| {batch['confirmed_follows']} | {batch['confirmed_likes']} "
                 f"| {batch['available']} | {batch['status']} |"
+            )
+        for cooldown in report["cooldowns"]:
+            summary_lines.append(
+                f"- Cooldown after {cooldown['after_confirmed_pairs']} pairs: "
+                f"{cooldown['seconds'] / 60:.2f} minutes "
+                f"({cooldown['status']})"
             )
         if report["error"]:
             summary_lines.append("\n**Stopped:** " + report["error"])

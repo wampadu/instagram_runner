@@ -27,7 +27,7 @@ async def fetch_recent(client, tag, amount=8):
     return await client.hashtag_medias_recent(tag, amount=amount)
 
 
-async def check(tag, amount, session):
+async def check(tag, amount, session, source="private"):
     from aiograpi import Client
 
     stage = "loading local session"
@@ -42,12 +42,20 @@ async def check(tag, amount, session):
         raise RuntimeError(f"{stage}: {type(exc).__name__}") from None
     stage = "reading recent hashtag tab"
     try:
-        items = await fetch_recent(client, tag, amount)
+        if source == "private":
+            items = await fetch_recent(client, tag, amount)
+        else:
+            # An independent GraphQL surface with show_ranked=False. Instagram
+            # may still rank/limit these results; verify actual timestamps.
+            items, _cursor = await client.hashtag_medias_paginated_gql(tag, amount=amount)
     except Exception as exc:
         raise RuntimeError(f"{stage}: {type(exc).__name__}") from None
 
     print("Authenticated session reuse: PASS")
-    print("Endpoint: PRIVATE mobile hashtag tab=recent; NO Top-post fallback")
+    if source == "private":
+        print("Endpoint: PRIVATE mobile hashtag tab=recent; NO Top-post fallback")
+    else:
+        print("Endpoint: PUBLIC GraphQL show_ranked=False; NOT guaranteed chronological; NO Top-post fallback")
     print("Hashtag:", "#" + tag)
     print("Returned posts:", len(items))
     ages = [age_in_hours(getattr(m, "taken_at", None)) for m in items]
@@ -65,6 +73,7 @@ def main():
     parser = argparse.ArgumentParser(description="One read-only recent-hashtag check using a saved Instagram session")
     parser.add_argument("--tag", default="toronto", help="Hashtag without the #")
     parser.add_argument("--amount", type=int, default=8)
+    parser.add_argument("--source", choices=("private", "public-gql"), default="private")
     args = parser.parse_args()
     tag = args.tag.strip().lstrip("#")
     if not tag or args.amount < 1 or args.amount > 15 or not tag.replace("_", "").isalnum():
@@ -74,7 +83,7 @@ def main():
         print("Saved session missing. Interactive login must succeed first.")
         return 1
     try:
-        return asyncio.run(asyncio.wait_for(check(tag, args.amount, DEFAULT_SESSION), timeout=90))
+        return asyncio.run(asyncio.wait_for(check(tag, args.amount, DEFAULT_SESSION, args.source), timeout=90))
     except Exception as exc:
         print("Read-only recent check failed. Error class:", type(exc).__name__)
         # Only print sanitized exception strings created here (no raw network responses).

@@ -1,0 +1,74 @@
+name: aiograpi compatibility check
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_login:
+        description: "Attempt one Instagram login after dependency smoke test"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instagram-aiograpi-compatibility
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install aiograpi
+        run: python -m pip install --disable-pip-version-check aiograpi
+      - name: Import and interface smoke test
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import inspect
+          from aiograpi import Client
+          print("aiograpi version:", importlib.metadata.version("aiograpi"))
+          print("Client import: passed")
+          for name in ("login", "account_info", "hashtag_medias_recent", "hashtag_medias_top", "media_like", "user_follow"):
+              print(f"{name}: {'available' if callable(getattr(Client, name, None)) else 'unavailable'}")
+          print("Login parameters:", ", ".join(inspect.signature(Client.login).parameters))
+          PY
+      - name: Single login test (no proxy, no writes)
+        if: ${{ inputs.test_login }}
+        env:
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
+          IG_2FA_CODE: ${{ secrets.IG_2FA_CODE }}
+        run: |
+          python - <<'PY'
+          import contextlib, io, logging, os, sys
+          logging.disable(logging.CRITICAL)
+          user = os.environ.get("IG_USERNAME", "").strip().lstrip("@")
+          password = os.environ.get("IG_PASSWORD", "")
+          if not user or not password:
+              print("Missing IG_USERNAME or IG_PASSWORD secret")
+              sys.exit(1)
+          stage = "initialize"
+          try:
+              with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                  from aiograpi import Client
+                  client = Client()
+                  if hasattr(client, "with_challenge_flow"):
+                      client.with_challenge_flow = False
+                  stage = "login"
+                  client.login(user, password, verification_code=os.environ.get("IG_2FA_CODE", "").strip())
+                  stage = "account_info"
+                  info = client.account_info()
+                  if info.username.lower() != user.lower():
+                      raise RuntimeError("Account mismatch")
+          except Exception as exc:
+              print("Failed stage:", stage)
+              print("Error class:", type(exc).__name__)
+              print("No likes, follows or hashtag requests attempted")
+              sys.exit(1)
+          print("Authentication passed. No likes, follows or hashtag requests attempted.")
+          PY

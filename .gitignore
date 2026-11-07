@@ -3,3 +3,5 @@ state/
 __pycache__/
 *.log
 .env
+.venv-aiograpi/
+*.session.json

@@ -66,6 +66,15 @@ async def check(tag, amount, session, source="private"):
     for n, h in enumerate(ages, 1):
         print(f"Post {n} age (hours): {h if h is not None else 'unknown'}")
     print("No likes, follows, comments, downloads, or session exports performed.")
+    recent24 = sum(0 <= x <= 24 for x in known)
+    if not items:
+        print("RECENT POSTS NOT VERIFIED: endpoint returned zero posts. Keep write actions disabled.")
+        return 3
+    if not known or recent24 == 0:
+        print("RECENT POSTS NOT VERIFIED: no retrieved post demonstrably under 24 hours old.")
+        return 3
+    print("RECENT POST AGE VERIFIED: at least one post is less than 24 hours old.")
+    print("This does NOT prove complete chronological hashtag coverage.")
     return 0
 
 

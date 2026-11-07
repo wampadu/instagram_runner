@@ -243,3 +243,33 @@ bash compare_old_termux.sh
 ```
 
 Keep automated likes and follows disabled until there is a dependable discovery method with verifiable timestamps and appropriate account safety checks.
+
+## November 2026: strongest verified next test for exact `#follow_for_follow` Recent feed
+
+### Findings, not assumptions
+
+1. Saved `aiograpi` login is valid on the user's Termux phone. `instagrapi 3.2.6` also authenticates from the same session.
+2. The private `tags/follow_for_follow/sections/` response gives `status=ok` and `sections=[]`, for **both Recent and Top**. The old `instagrapi` uses this same endpoint. Changing parser, request amount, sleep, Python sync/async style or device model is not a demonstrated fix.
+3. Instagram returns a historical media count for `#follow_for_follow`, but that does not prove any *newest* posts are available. This tag is **not** the same as `#followforfollow`; both were previously tested.
+4. A separate indexed provider search for the exact caption returned zero indexed results; that provider is **not a live full hashtag feed**. Public hashtag-search websites may time out. Do not claim a successful live hashtag feed on this evidence.
+5. The official Meta Facebook Login Instagram Graph API does have `ig_hashtag_search` and `/{hashtag-id}/recent_media`, but requires professional-account access, Meta permissions and potentially App Review, and is limited to 30 distinct hashtag queries per rolling 7 days. Sensitive/restricted hashtags can be unavailable.
+
+### Capped free-credit test with Apify (no Instagram password or cookies)
+
+Apify offers a free plan with **US$5 of usage credits per month**. The independent `coregent/instagram-hashtag-scraper` Actor documents `sort: RECENT` and `postsNewerThan: 24 hours`. The code at `scripts/apify_recent_verified.py` invokes that documented Actor through the Apify API, strictly verifies exact tag/caption, timestamp and URL, sorts newest first, and **caps the run total charge to US$0.10** using Apify's `maxTotalChargeUsd` API parameter. It never uses the user's Instagram session. Five local offline tests passed on Android/Termux. **We have NOT yet live-confirmed that this Actor returns any `#follow_for_follow` results**: a real API token is still required.
+
+1. Register for a free Apify account at https://console.apify.com and copy an API token privately from your account's Settings → API & Integrations.
+2. In Termux:
+
+```bash
+cd ~/instagram_runner
+git pull --ff-only
+bash apify_recent_termux.sh follow_for_follow
+```
+
+3. Enter the **Apify** token in the Termux hidden prompt (never in ChatGPT, GitHub source code, or terminal command history). If any verified links are found, they will be printed with publication age. A zero result or provider error means **do not claim this hashtag's Recent feed is working**.
+4. Do not enable mass-following/liking merely because post retrieval starts working. This pathway is strictly read-only.
+
+Official provider documentation: https://apify.com/pricing ; https://apify.com/coregent/instagram-hashtag-scraper ; https://docs.apify.com/api/v2/actor-run-sync-get-dataset-items-get .
+
+**Do not confuse the independent Social Fetch `401` test with evidence about whether its hashtag feed exists:** that result establishes failed API authorization, not feed contents. The prior `recent_provider_termux.sh` remains experimental, not a confirmed solution. Apify credits are finite; test a few rows before considering ongoing automation.

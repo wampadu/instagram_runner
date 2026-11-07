@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install aiograpi
-        run: python -m pip install --disable-pip-version-check aiograpi
+        run: python -m pip install --disable-pip-version-check 'aiograpi==2.1.2'
       - name: Import and interface smoke test
         run: |
           python - <<'PY'
@@ -36,7 +36,7 @@ jobs:
           if not inspect.iscoroutinefunction(Client.account_info):
               raise RuntimeError("Unexpected API: Client.account_info must be async")
           print("aiograpi version:", importlib.metadata.version("aiograpi"))
-          print("Client import: passed")
+          print("Client import: passed; async login/account_info methods verified")
           for name in ("login", "account_info", "hashtag_medias_recent", "hashtag_medias_top", "media_like", "user_follow"):
               print(f"{name}: {'available' if callable(getattr(Client, name, None)) else 'unavailable'}")
           print("Login parameters:", ", ".join(inspect.signature(Client.login).parameters))

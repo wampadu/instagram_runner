@@ -264,7 +264,7 @@ def choose_new_post(client, eligible, hashtag, report):
     report["skipped_unverified"] = 0
     for item in eligible:
         code, username = item.get("code"), item.get("username")
-        if not isinstance(code, str) or not USER_RE.fullmatch(username or ""):
+        if not isinstance(code, str) or not isinstance(username, str) or not USER_RE.fullmatch(username):
             report["skipped_unverified"] += 1
             continue
         try:

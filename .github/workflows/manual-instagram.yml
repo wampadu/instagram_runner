@@ -73,7 +73,7 @@ jobs:
         continue-on-error: true
         env:
           # Confirmed NEW follow+like pairs; defaults to two when unset.
-          TARGET_COUNT: ${{ vars.IG_LIKE_COUNT || '2' }}
+          TARGET_COUNT: ${{ vars.IG_LIKE_FOLLOW || '2' }}
           IG_HASHTAG: ${{ inputs.hashtag || 'followforfollow' }}
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
           IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}

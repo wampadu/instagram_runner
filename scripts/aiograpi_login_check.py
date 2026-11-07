@@ -8,6 +8,8 @@ import io
 import logging
 import os
 import sys
+import traceback
+from pathlib import Path
 
 async def verify_client(client, username, password, code, stage):
     stage["value"] = "await login"
@@ -41,6 +43,9 @@ def main():
     except Exception as exc:
         print("Failed stage:", stage["value"])
         print("Error class:", type(exc).__name__)
+        frames = traceback.extract_tb(exc.__traceback__)
+        safe_frames = [f"{Path(frame.filename).name}:{frame.name}:{frame.lineno}" for frame in frames[-6:]]
+        print("Sanitized call path:", " > ".join(safe_frames))
         print("No automatic retries. Resolve any challenge using Instagram directly.")
         print("No likes, follows or hashtag requests were attempted.")
         return 1

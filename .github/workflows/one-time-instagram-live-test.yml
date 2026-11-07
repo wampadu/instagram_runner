@@ -1,6 +1,7 @@
 name: Instagram one-time live test (2 follow + like)
 
-# Temporary workflow triggered by its creation commit only; not scheduled.
+# Temporary workflow triggered by this named test commit only; not scheduled.
+# Second attempt: CLI parser fixed and regression tested.
 on:
   push:
     paths:

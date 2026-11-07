@@ -1,0 +1,72 @@
+name: Instagram - follow and like N posts (variable-controlled)
+
+# Manual test; no schedule. IG_LIKE_COUNT is a repository Actions variable.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Preview or actually follow authors and like posts'
+        required: true
+        type: choice
+        options:
+          - preview
+          - follow_like
+        default: preview
+      hashtag:
+        description: 'Exact hashtag; newest verified posts first'
+        required: true
+        type: string
+        default: followforfollow
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instagram-manual-one-account
+  cancel-in-progress: false
+
+jobs:
+  follow-and-like-test:
+    name: Follow and like IG_LIKE_COUNT authors/posts
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Test variable-driven logic offline
+        run: python -m unittest -v test_like_posts_variable test_manual_instagram_actions
+      - name: Preview or follow-and-like
+        id: instagram
+        continue-on-error: true
+        env:
+          RUN_MODE: ${{ inputs.mode }}
+          IG_HASHTAG: ${{ inputs.hashtag }}
+          IG_LIKE_COUNT: ${{ vars.IG_LIKE_COUNT || '2' }}
+          IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
+          IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/instagram-follow-like-test"
+          python -m scripts.like_posts_variable \
+            --mode "$RUN_MODE" \
+            --hashtag "$IG_HASHTAG" \
+            --count "$IG_LIKE_COUNT" \
+            --max-pages 3 \
+            --output-dir "$RUNNER_TEMP/instagram-follow-like-test"
+      - name: Upload result summary (without session data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-follow-like-${{ github.run_id }}
+          path: ${{ runner.temp }}/instagram-follow-like-test/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Fail job if engagement was not completed
+        if: steps.instagram.outcome == 'failure'
+        run: |
+          echo "Instagram run incomplete; review Summary and artifact." >&2
+          exit 1

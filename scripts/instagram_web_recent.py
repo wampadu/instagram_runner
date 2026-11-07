@@ -19,10 +19,11 @@ from scripts.instagram_web_recent_probe import (
 )
 
 
-def load_http():
-    if not SESSION.is_file():
+def load_http(session_path=SESSION):
+    session_path=Path(session_path)
+    if not session_path.is_file():
         raise ValueError("Saved Termux session missing")
-    with SESSION.open("r") as f:
+    with session_path.open("r") as f:
         saved=json.load(f)
     cookies=saved.get("cookies")
     if not isinstance(cookies,dict) or not isinstance(cookies.get("sessionid"),str):

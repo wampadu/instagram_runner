@@ -1,3 +1,37 @@
+## NEW — Manual GitHub Actions: preview, follow one account, like one post
+
+[Open **Instagram manual preview / follow and like** in GitHub Actions](https://github.com/wampadu/instagram_runner/actions/workflows/manual-instagram.yml)
+
+**This workflow runs ONLY when you click Run workflow.** No cron, no push trigger, no automatic likes/follows. It combines the tested free web `recent` hashtag reader with the `instagrapi==3.2.6` account client. Each execution makes **at most one follow request and one like request**, using that post's actual author and exact media ID, after checking the post caption and timestamp. It has a Preview-only default. All write exceptions stop the job; no automatic replay.
+
+### One-time session setup — keep your credentials private
+
+GitHub Actions runs on **GitHub-hosted servers**, not inside your phone's Termux. The working Instagram login is saved **only on your phone** in `~/.instagram_runner/aiograpi-session.json`. You must supply it as an **encrypted GitHub Actions repository secret**, not as a committed file or workflow input.
+
+1. Open [Settings → Secrets and variables → Actions → New repository secret](https://github.com/wampadu/instagram_runner/settings/secrets/actions/new).
+2. Secret **Name**: `IG_SESSION_JSON`.
+3. Secret **Value**: the entire contents of your **local** `~/.instagram_runner/aiograpi-session.json` file. In Termux, you can open it with `cat ~/.instagram_runner/aiograpi-session.json`, select/copy the full JSON *privately on your own phone*, then paste it into the GitHub Secret value field. Never paste it into chat, an issue, a workflow input, public repository files, or Actions logs. Click **Add secret**.
+4. This token is highly sensitive and can grant account access; it is accessible to GitHub Actions running with this repository's trusted workflow permissions. Keep your repository access restricted. You can delete/revoke it later in repository Settings. GitHub may ask for new Instagram verification when the same session runs from a different IP/network. **Do not disable account security or repeatedly retry rejected sessions.**
+
+An optional compressed secret named `IG_SESSION_GZIP_B64` is also supported for sessions larger than GitHub's 48 KB secret limit; it takes precedence if both secrets exist.
+
+### Manual run and results
+
+Click **Actions → Instagram manual preview / follow and like → Run workflow**, then choose:
+
+- **Preview** (default) — enter an exact hashtag (e.g. `follow_for_follow` or `followforfollow`), choose age 1–168 hours, and run. It reports **verified post links, authors, ages and retrieval counts**, but makes no account changes.
+- **follow_like** — enter a post permalink from Preview in **post_url** to choose the exact target (recommended). If empty, it picks the newest verified eligible sampled post. Set **confirm** to `FOLLOW_AND_LIKE` and run. It verifies the post, checks whether you already follow the account or have liked the post, and attempts **one follow + one like**, returning `confirmed`, `already_following`, `already_liked`, `uncertain`, etc. Do not automatically retry any uncertain action.
+
+Open the workflow run's **Summary** for results, or download its `instagram-manual-results-...` artifact containing `results.md` and `results.json`. Neither artifact includes your session.
+
+**Validated on the phone:** 12 offline unit tests passed and Preview found 4 eligible `#follow_for_follow` posts in the sampled two-page feed. A separate live **READ-ONLY preflight** on one verified post succeeded: account authenticated, post/author/hashtag/age checked, friendship state and liked state readable, zero write actions performed. **Actual follow/like writes and a GitHub-hosted live run have not yet been tested** (the encrypted secret has not yet been set). The session may fail in GitHub's cloud because its network differs from your phone.
+
+CLI alternatives from Termux (after `git pull --ff-only`): `python -m scripts.manual_instagram_actions --mode preview --hashtag follow_for_follow --hours 168` inside Debian's `venv-instagrapi`, or `python -m scripts.manual_preflight https://www.instagram.com/p/SHORTCODE/ --tag follow_for_follow` for a read-only check.
+
+**Safety:** No bulk follow/like loops, no proxy rotation or challenge bypass, no background schedules. Repeated manual runs are independent; Instagram's own current follow/like state is checked, but there is no persistent cloud ledger between runs. This is an unofficial automation that Instagram may restrict. The website's recent tab does **not** guarantee a complete chronological hashtag feed.
+
+---
+
 ## WORKING FREE SOLUTION (November 2026): Instagram web Recent posts, no Meta app
 
 **Use this instead of the older Android `aiograpi.hashtag_medias_recent` or a paid data provider.** Tested live on a Pixel 9 Pro using only its pre-existing private local Termux session. No Meta developer account, no Graph API key, no credit card, no other registration. No like/follow actions.

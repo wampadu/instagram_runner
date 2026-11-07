@@ -4,6 +4,8 @@ Never prints response data, cookies, IDs, URLs, captions, headers, or tokens.
 Shows only counts, selected allowlisted field names, and media age buckets.
 """
 import asyncio
+import argparse
+import re
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,7 +51,7 @@ def classify_response(response):
     }
 
 
-async def main():
+async def main(tag):
     logging.disable(logging.CRITICAL)
     if not SESSION.exists():
         print("Session missing; stopped.")
@@ -63,7 +65,13 @@ async def main():
         print("Auth verification failed:", type(exc).__name__)
         return 2
     print("Authentication: PASS (saved session; no password login)")
-    tag="toronto"
+    print("Hashtag:", "#" + tag)
+    try:
+        info = await asyncio.wait_for(client.hashtag_info_v1(tag), timeout=30)
+        print("Hashtag info: available")
+        print("Reported media count:", getattr(info, "media_count", "unavailable"))
+    except Exception as exc:
+        print("Hashtag info error:", type(exc).__name__)
     # Compare only two tabs: top as a control, and recent as requested.
     for tab in ("top", "recent"):
         data = {
@@ -87,7 +95,13 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(asyncio.run(asyncio.wait_for(main(),timeout=100)))
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--tag", default="toronto")
+        args = parser.parse_args()
+        tag = args.tag.lstrip("#").lower()
+        if not re.fullmatch("[a-z0-9_]{1,60}", tag):
+            parser.error("Invalid hashtag")
+        raise SystemExit(asyncio.run(asyncio.wait_for(main(tag),timeout=125)))
     except Exception as exc:
         print("Probe error:",type(exc).__name__)
         raise SystemExit(1)

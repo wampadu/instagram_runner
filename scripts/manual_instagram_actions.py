@@ -33,6 +33,7 @@ POST_URL_RE = re.compile(
 )
 USER_RE = re.compile(r"^[A-Za-z0-9_.]{1,30}$")
 EXACT = "FOLLOW_AND_LIKE"
+FRESH_MAX_HOURS = 6  # Absolute ceiling for previews and all write actions.
 
 
 class SafeStop(Exception):
@@ -77,7 +78,7 @@ def check_target_media(media, code, tag, max_hours, expected_user=None):
     if not contains_tag(getattr(media, "caption_text", None), tag):
         raise SafeStop("Post caption does not contain the exact requested hashtag.")
     age = age_hours(getattr(media, "taken_at", None))
-    if age is None or not 0 <= age <= max_hours:
+    if age is None or not 0 <= age <= min(max_hours, FRESH_MAX_HOURS):
         raise SafeStop("Post timestamp is outside the allowed age window.")
     media_id = getattr(media, "id", None)
     if not isinstance(media_id, str) or not re.fullmatch(r"[0-9]+_[0-9]+", media_id):
@@ -260,6 +261,8 @@ def run(args):
         "candidates":[],"engagement":None,"error":None,
     }
     try:
+        if not 1 <= args.hours <= FRESH_MAX_HOURS:
+            raise SafeStop("Only posts from the last 1–6 hours are allowed; older posts are never used.")
         if args.mode == "follow_like" and args.confirm != EXACT:
             raise SafeStop("To engage, set confirmation to FOLLOW_AND_LIKE.")
         with private_session_path() as session_path:
@@ -275,12 +278,12 @@ def run(args):
                 result["discovery"]={
                     "pages":len(pages), "raw":sum(p["raw"] for p in pages),
                     "verified":len(records),
-                    "eligible":sum(c["age"]<=args.hours for c in records),
+                    "eligible":sum(0 <= c["age"] <= min(args.hours,FRESH_MAX_HOURS) for c in records),
                     "http_statuses":[p["http"] for p in pages],
                 }
                 if failed:
                     raise SafeStop("Instagram web feed unavailable: "+",".join(failed))
-                eligible=[c for c in records if c["age"]<=args.hours]
+                eligible=[c for c in records if 0 <= c["age"] <= min(args.hours,FRESH_MAX_HOURS)]
                 for c in eligible[:15]:
                     username=c["username"] if USER_RE.fullmatch(c["username"]) else "(unavailable)"
                     result["candidates"].append({
@@ -290,7 +293,7 @@ def run(args):
                 if args.mode=="follow_like":
                     picked=next((c for c in eligible if USER_RE.fullmatch(c["username"])),None)
                     if not picked:
-                        raise SafeStop("No recent exact-tag candidate available to engage.")
+                        raise SafeStop("No exact-hashtag post from the last 6 hours; no older post will be used.")
                     post_code=picked["code"]
             if args.mode=="follow_like":
                 client=make_client(session_path)
@@ -321,13 +324,13 @@ def parse_args():
     p.add_argument("--hashtag",default="follow_for_follow")
     p.add_argument("--post-url",default="",help="Optional exact Instagram URL; bypasses discovery in follow_like mode")
     p.add_argument("--max-pages",type=int,choices=[1,2,3],default=2)
-    p.add_argument("--hours",type=int,default=168)
+    p.add_argument("--hours",type=int,default=6)
     p.add_argument("--confirm",default="")
     p.add_argument("--output-dir",default="")
     args=p.parse_args()
     args.hashtag=args.hashtag.lower().lstrip("#")
-    if not TAG.fullmatch(args.hashtag) or not 1<=args.hours<=168:
-        p.error("Use one valid hashtag and age window of 1..168 hours")
+    if not TAG.fullmatch(args.hashtag) or not 1<=args.hours<=FRESH_MAX_HOURS:
+        p.error("Use one valid hashtag and a strictly enforced age window of 1..6 hours")
     return args
 
 

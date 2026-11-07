@@ -218,3 +218,28 @@ bash recent_provider_termux.sh openhandle follow_for_follow
 Enter the selected provider's API key **only in Termux**, when prompted invisibly. Do not paste a key or your existing Instagram session into chat, GitHub, an issue or a repository file. If no posts are shown, the provider may hide that hashtag too; this cannot be bypassed by treating ranked posts as recent.
 
 The working local account-first discovery remains available with `bash discover_termux.sh follow_for_follow --max-age-hours 48`, but **it is incomplete and not a hashtag-wide latest feed**. The existing write automation remains separate and disabled for these new read-only pathways.
+
+## Old instagrapi vs new aiograpi: controlled November 2026 comparison
+
+The user's historical script called `instagrapi.Client.hashtag_medias_recent(name, amount=60)`. This and `aiograpi.Client.hashtag_medias_recent(name, amount=...)` both use Instagram's private `tags/{name}/sections/` endpoint, with `tab=recent` and `media_recency_filter=top_recent_posts`. The different synchronous/asynchronous execution does **not** amount to a different hashtag feed API.
+
+The old script calls `set_device({...Pixel 9 Pro...})` **before** `load_settings()`. The library's `load_settings()` reinitializes the client, so saved session settings replace manually configured device values; this was confirmed with an on-device comparison (device and app-version equality were both false).
+
+**Controlled read-only live tests on the same local saved session** (no fresh login and no write actions):
+
+| Check | Old instagrapi 3.2.6 | New aiograpi |
+|---|---|---|
+| Account authentication via session | PASS | PASS |
+| `#follow_for_follow` Recent | 0 posts | 0 posts |
+| `#followforfollow` Recent | 0 posts | Previously tested as empty in new-client tests |
+
+The old original code's hashtag list contained `followforfollow` without underscores, which is a different hashtag. A successful historical run cannot establish that the same endpoint still delivers posts in November 2026. Instagram currently acknowledges the hashtag and returns a media count, while the sections endpoint returns an empty response. The exact server-side reason remains **unknown**; do not claim the old device signature or a synchronous API would fix it.
+
+For a read-only on-phone repetition (not recommended repeatedly because the endpoint currently returns empty):
+
+```bash
+cd ~/instagram_runner
+bash compare_old_termux.sh
+```
+
+Keep automated likes and follows disabled until there is a dependable discovery method with verifiable timestamps and appropriate account safety checks.

@@ -19,14 +19,16 @@ An optional compressed secret named `IG_SESSION_GZIP_B64` is also supported for 
 
 Click **Actions → Instagram manual preview / follow and like → Run workflow**, then choose:
 
-- **Preview** (default) — enter an exact hashtag (e.g. `follow_for_follow` or `followforfollow`), choose age 1–168 hours, and run. It reports **verified post links, authors, ages and retrieval counts**, but makes no account changes.
+- **Preview** (default) — enter an exact hashtag (e.g. `follow_for_follow` or `followforfollow`), choose an age limit from 1–24 hours (default 24), and run. It displays only exact-tag posts within the age cutoff, sorted **newest to oldest**, with verified links, authors, ages and retrieval counts, but makes no account changes.
 - **follow_like** — enter a post permalink from Preview in **post_url** to choose the exact target (recommended). If empty, it picks the newest verified eligible sampled post. Set **confirm** to `FOLLOW_AND_LIKE` and run. It verifies the post, checks whether you already follow the account or have liked the post, and attempts **one follow + one like**, returning `confirmed`, `already_following`, `already_liked`, `uncertain`, etc. Do not automatically retry any uncertain action.
 
 Open the workflow run's **Summary** for results, or download its `instagram-manual-results-...` artifact containing `results.md` and `results.json`. Neither artifact includes your session.
 
-**Validated on the phone:** 12 offline unit tests passed and Preview found 4 eligible `#follow_for_follow` posts in the sampled two-page feed. A separate live **READ-ONLY preflight** on one verified post succeeded: account authenticated, post/author/hashtag/age checked, friendship state and liked state readable, zero write actions performed. **Actual follow/like writes and a GitHub-hosted live run have not yet been tested** (the encrypted secret has not yet been set). The session may fail in GitHub's cloud because its network differs from your phone.
+**Validated on the phone:** 15 offline unit tests passed and Preview found 4 posts within seven days under `#follow_for_follow`, but **none within the strict 24-hour cutoff**. A separate live **READ-ONLY preflight** on one verified post succeeded: account authenticated, post/author/hashtag/age checked, friendship state and liked state readable, zero write actions performed. **The GitHub-hosted Preview workflow was run successfully**. The one-follow/one-like write still has not been tested. Posts older than 24 hours are never selected, even if explicitly linked. The session may fail in GitHub's cloud because its network differs from your phone.
 
-CLI alternatives from Termux (after `git pull --ff-only`): `python -m scripts.manual_instagram_actions --mode preview --hashtag follow_for_follow --hours 168` inside Debian's `venv-instagrapi`, or `python -m scripts.manual_preflight https://www.instagram.com/p/SHORTCODE/ --tag follow_for_follow` for a read-only check.
+CLI alternatives from Termux (after `git pull --ff-only`): `python -m scripts.manual_instagram_actions --mode preview --hashtag follow_for_follow --hours 24` inside Debian's `venv-instagrapi`, or `python -m scripts.manual_preflight https://www.instagram.com/p/SHORTCODE/ --tag follow_for_follow` for a read-only check.
+
+**Age policy:** Only posts 0–24 hours old are eligible, sorted newest first based on publication timestamp. If the sampled feed has none, Preview shows zero and follow_like stops without falling back to older posts. The age is rechecked immediately before any account action.
 
 **Safety:** No bulk follow/like loops, no proxy rotation or challenge bypass, no background schedules. Repeated manual runs are independent; Instagram's own current follow/like state is checked, but there is no persistent cloud ledger between runs. This is an unofficial automation that Instagram may restrict. The website's recent tab does **not** guarantee a complete chronological hashtag feed.
 

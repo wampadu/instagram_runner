@@ -47,7 +47,7 @@ jobs:
           print("Login parameters:", ", ".join(inspect.signature(Client.login).parameters))
           PY
       - name: One real login and authenticated read (no proxy, no writes)
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.test_login) || (github.event_name == 'push' && github.event.head_commit.message == 'One-shot awaited aiograpi login validation') }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.test_login) || (github.event_name == 'push' && github.event.head_commit.message == 'One-shot sanitized aiograpi traceback diagnostic') }}
         env:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}

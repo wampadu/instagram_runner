@@ -171,3 +171,20 @@ bash login_termux.sh
 The script installs the pinned upstream `aiograpi` development revision, then prompts for your username and password privately in Termux. If Instagram asks for a verification code, enter a **fresh** code in Termux, not in chat or GitHub. Do not reuse an expired code. A successful authenticated API read saves session settings to `~/.instagram_runner/aiograpi-session.json` on the phone. Never upload or share that file. The session is **not** automatically transferred to GitHub Actions; GitHub-hosted runners may still face verification and separate IP/device checks.
 
 **Limitations:** Termux installation of `aiograpi`'s compiled Python dependencies can fail on Android/ARM even when Windows/Linux installation succeeds. The Termux installer has not yet been tested on your particular phone. Do not keep retrying authentication after a challenge or rejection. This login setup does not enable likes/follows or verify newest hashtag results.
+
+## Working alternative: discover fresh hashtagged posts in Termux (read-only)
+
+The old Instagram `tags/{hashtag}/sections/` endpoint returned `status=ok` but **no sections even for Top** in live November 2026 testing. Repeating that request or changing JSON parsers cannot produce posts. The separate `aiograpi` account-first discovery script uses **working** authenticated `search_users()` and `user_medias_v1()` requests, then verifies the *exact caption hashtag* and the media publication timestamp. It never uses Top hashtag posts and never performs likes/follows. **It searches accounts by name, not a global hashtag timeline: results are necessarily incomplete.**
+
+Tested live on an existing saved phone session with `#toronto`: searched 6 public accounts, scanned 30 posts, and found two qualifying posts from the previous six hours. No password login required.
+
+From the existing `~/instagram_runner` folder in Termux:
+
+```bash
+git pull --ff-only
+bash discover_termux.sh toronto --max-age-hours 48
+bash discover_termux.sh followforfollow likeforlike --max-accounts 6 --per-account 5 --max-age-hours 48
+```
+
+The output contains verified post links, the post's public username, and hours since publication. Defaults: 6 public accounts per query, 5 posts per account, and an adjustable age limit (up to 168 hours). Queries that find zero matching posts are **not** proof that a hashtag has no recent posts. The saved session remains under `/root/.instagram_runner/` inside the Termux Debian environment; never upload or paste it publicly. The original `runner.py` remains separate and is not enabled to follow/like on this alternative discovery path.
+

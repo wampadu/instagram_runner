@@ -6,7 +6,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 import unittest
 
-from scripts.like_posts_variable import HASHTAGS, hashtag_plan, run
+from scripts.like_posts_variable import HASHTAGS, hashtag_plan, run, parse_args
 
 
 class VariableEngagementTests(unittest.TestCase):
@@ -66,6 +66,16 @@ class VariableEngagementTests(unittest.TestCase):
              patch("scripts.like_posts_variable.save_report") as save:
             status = run(args)
             return status, save.call_args.args[0], search, make, engagement
+
+    def test_actual_cli_two_post_parse(self):
+        with patch("sys.argv", [
+            "like_posts_variable", "--mode", "follow_like",
+            "--count", "2", "--max-pages", "3",
+        ]):
+            args = parse_args()
+            self.assertEqual(args.count, 2)
+            self.assertEqual(args.mode, "follow_like")
+            self.assertEqual(args.max_pages, 3)
 
     def test_plan_counts_and_order(self):
         self.assertEqual(hashtag_plan(2), [("followforfollow", 2)])

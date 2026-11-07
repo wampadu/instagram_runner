@@ -104,7 +104,9 @@ class CycleTests(unittest.TestCase):
         available["follow4follow"] = 0
         status, calls = self.invoke(self.args(100), candidates_per_tag=available)
         self.assertEqual(status, 0)
-        self.assertEqual(calls, list(HASHTAG_POOL) + list(HASHTAG_POOL[:2]))
+        # With 25 candidates/tag, the second pass uses five more from
+        # each nonempty tag; the fourth remains empty in both passes.
+        self.assertEqual(calls, list(HASHTAG_POOL) * 2)
 
     def test_all_hashtags_empty_stops_after_one_pass(self):
         status, calls = self.invoke(self.args(20), candidates_per_tag=0)

@@ -31,53 +31,69 @@ jobs:
           import importlib.metadata
           import inspect
           from aiograpi import Client
+          if not inspect.iscoroutinefunction(Client.login):
+              raise RuntimeError("Unexpected API: Client.login must be async")
+          if not inspect.iscoroutinefunction(Client.account_info):
+              raise RuntimeError("Unexpected API: Client.account_info must be async")
           print("aiograpi version:", importlib.metadata.version("aiograpi"))
           print("Client import: passed")
           for name in ("login", "account_info", "hashtag_medias_recent", "hashtag_medias_top", "media_like", "user_follow"):
               print(f"{name}: {'available' if callable(getattr(Client, name, None)) else 'unavailable'}")
           print("Login parameters:", ", ".join(inspect.signature(Client.login).parameters))
           PY
-      - name: Single login test (no proxy, no writes)
+      - name: One real login and authenticated read (no proxy, no writes)
         if: ${{ inputs.test_login }}
         env:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
           IG_2FA_CODE: ${{ secrets.IG_2FA_CODE }}
+        shell: bash
         run: |
           python - <<'PY'
-          import asyncio, contextlib, io, logging, os, sys
+          import asyncio
+          import contextlib
+          import io
+          import logging
+          import os
+          import sys
+
           logging.disable(logging.CRITICAL)
-          user = os.environ.get("IG_USERNAME", "").strip().lstrip("@")
+          username = os.environ.get("IG_USERNAME", "").strip().lstrip("@")
           password = os.environ.get("IG_PASSWORD", "")
-          if not user or not password:
-              print("Missing IG_USERNAME or IG_PASSWORD secret")
+          code = os.environ.get("IG_2FA_CODE", "").strip()
+          if not username or not password:
+              print("Configuration error: missing IG_USERNAME or IG_PASSWORD")
               sys.exit(1)
-          stage = "initialize"
+
+          stage = "client initialization"
+
+          async def verify_login():
+              global stage
+              from aiograpi import Client
+              client = Client()
+              if hasattr(client, "with_challenge_flow"):
+                  client.with_challenge_flow = False
+              stage = "await login"
+              result = await client.login(username, password, verification_code=code)
+              if result is not True:
+                  raise RuntimeError("Login did not confirm success")
+              stage = "verify user ID"
+              if not getattr(client, "user_id", None):
+                  raise RuntimeError("No authenticated user ID")
+              stage = "authenticated account_info"
+              info = await client.account_info()
+              if getattr(info, "username", "").lower() != username.lower():
+                  raise RuntimeError("Account verification mismatch")
+
           try:
               with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                  from aiograpi import Client
-                  client = Client()
-                  if hasattr(client, "with_challenge_flow"):
-                      client.with_challenge_flow = False
-                  stage = "login"
-                  login_result = client.login(user, password, verification_code=os.environ.get("IG_2FA_CODE", "").strip())
-                  stage = "session validation"
-                  if not login_result:
-                      raise RuntimeError("Login did not return success")
-                  if not getattr(client, "user_id", None):
-                      raise RuntimeError("Missing authenticated user ID")
-                  stage = "session state"
-                  settings = client.get_settings()
-                  if not isinstance(settings, dict):
-                      raise RuntimeError("Invalid session settings")
+                  asyncio.run(verify_login())
           except Exception as exc:
               print("Failed stage:", stage)
               print("Error class:", type(exc).__name__)
-              if type(exc).__name__ == "PreLoginRequired":
-                  print("Instagram rejected the account-info request as unauthenticated; login is not verified.")
-              print("No likes, follows or hashtag requests attempted")
+              print("No automatic retry. Resolve any Instagram verification request in the official app.")
+              print("No likes, follows, or hashtag reads were performed.")
               sys.exit(1)
-          print("Login returned success and session state was present.")
-          print("Authenticated API reads remain unverified; previous account_info returned PreLoginRequired.")
-          print("No likes, follows or hashtag requests attempted. No session was exported.")
+          print("PASS: awaited login and authenticated account-info request both succeeded.")
+          print("No proxy, likes, follows, hashtag reads, or session export.")
           PY

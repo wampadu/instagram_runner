@@ -1,4 +1,4 @@
-name: Instagram recent (6h) manual preview / follow and like
+name: Instagram recent (24h) manual preview / follow and like
 
 # MANUAL ONLY: no cron, push, or pull_request trigger.
 on:
@@ -18,12 +18,12 @@ on:
         type: string
         default: follow_for_follow
       max_age_hours:
-        description: 'Strict maximum age 1-6 hours; never use older posts'
+        description: 'Strict maximum age 1-24 hours; newest first, never older'
         required: true
         type: number
-        default: 6
+        default: 24
       post_url:
-        description: 'OPTIONAL post/reel URL, must be younger than 6h. Empty = newest qualifying post.'
+        description: 'OPTIONAL post/reel URL, must be no older than 24h. Empty = newest qualifying post.'
         required: false
         type: string
       confirm:

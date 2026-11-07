@@ -224,6 +224,9 @@ def markdown_report(report):
             if not USER_RE.fullmatch(user):
                 user="(unavailable)"
             lines.append(f"| @{user} | {float(c['age']):.1f} h | [View post]({c['url']}) |")
+    if "skipped_existing" in report:
+        lines.append(f"- Skipped existing follows/likes: **{report['skipped_existing']}**")
+        lines.append(f"- Skipped unverified posts: **{report['skipped_unverified']}**")
     if report.get("engagement"):
         r=report["engagement"]
         lines.extend([
@@ -252,6 +255,54 @@ def save_report(report, output_dir):
     if summary:
         with open(summary,"a",encoding="utf-8") as out:
             out.write(markdown_report(report))
+
+
+def choose_new_post(client, eligible, hashtag, report):
+    """Find one author we do not follow and one post we have not liked."""
+    seen_authors = set()
+    report["skipped_existing"] = 0
+    report["skipped_unverified"] = 0
+    for item in eligible:
+        code, username = item.get("code"), item.get("username")
+        if not isinstance(code, str) or not USER_RE.fullmatch(username or ""):
+            report["skipped_unverified"] += 1
+            continue
+        try:
+            pk = client.media_pk_from_code(code)
+            media = client.media_info(pk, use_cache=False)
+            verified = check_target_media(
+                media, code, hashtag, expected_user=username
+            )
+        except Exception:
+            report["skipped_unverified"] += 1
+            continue
+        if str(client.user_id) == verified["uid"] or verified["uid"] in seen_authors:
+            report["skipped_existing"] += 1
+            continue
+        seen_authors.add(verified["uid"])
+        if getattr(media, "has_liked", None) is True:
+            report["skipped_existing"] += 1
+            continue
+        if getattr(media, "has_liked", None) is not False:
+            report["skipped_unverified"] += 1
+            continue
+        try:
+            relation = client.user_friendship_v1(verified["uid"])
+        except Exception as exc:
+            raise SafeStop(
+                "Could not verify follow state (" + type(exc).__name__ + ")."
+            ) from None
+        if relation is None:
+            raise SafeStop("Follow state unavailable. No actions taken.")
+        if (bool(getattr(relation, "following", False)) or
+                bool(getattr(relation, "outgoing_request", False))):
+            report["skipped_existing"] += 1
+            continue
+        return item
+    raise SafeStop(
+        "No unliked posts from unfollowed authors in the verified sample; "
+        "no new follow or like attempted."
+    )
 
 
 def run(args):
@@ -287,19 +338,19 @@ def run(args):
                         "username":username,"age":c["age"],
                         "url":f"https://www.instagram.com/p/{c['code']}/",
                     })
-                if args.mode=="follow_like":
-                    picked=next((c for c in eligible if USER_RE.fullmatch(c["username"])),None)
-                    if not picked:
-                        raise SafeStop("No verified exact-hashtag post available to select.")
-                    post_code=picked["code"]
             if args.mode=="follow_like":
                 client=make_client(session_path)
+                if not post_code:
+                    picked=choose_new_post(client, eligible, args.hashtag, result)
+                    post_code=picked["code"]
                 result["engagement"]=engagement(
                     client,post_code,args.hashtag,None,
                     expected_user=picked["username"] if picked else None,
                 )
-                if result["engagement"].get("error"):
-                    result["error"]="Engagement stopped; check individual action statuses."
+                outcome=result["engagement"]
+                if (outcome.get("error") or outcome.get("follow") != "confirmed"
+                        or outcome.get("like") != "confirmed"):
+                    result["error"]="No new follow-and-like pair confirmed; check individual action statuses."
     except SafeStop as exc:
         result["error"]=str(exc)
     except Exception as exc:

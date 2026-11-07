@@ -1,3 +1,17 @@
+## Daily Instagram hashtag discovery — 9 AM Toronto, read-only
+
+[**Open the daily discovery workflow**](https://github.com/wampadu/instagram_runner/actions/workflows/daily-instagram-review.yml).
+
+Runs automatically each day at **9 AM America/Toronto**, with daylight saving time handled using two UTC cron slots and a date-aware gate. GitHub can delay scheduled jobs, so a specific delivery minute is not guaranteed. It can also be started immediately with **Run workflow**.
+
+This scheduled workflow checks the user's **five original exact hashtags**: `#followforfollow`, `#likeforlike`, `#likeforfollow`, `#follow4follow`, `#like4like`. It collects **up to 20 distinct creator accounts per hashtag**, with global deduplication, for **up to 100 accounts total**. It checks a maximum of three Instagram web Recent pages per hashtag, verifies the exact caption hashtag and post timestamp, and sorts sample results **newest to oldest without an age cutoff**. It never pads a shortfall with unrelated results. Since Instagram controls the sampled feed, reaching 20 per tag (or 100 total) cannot be guaranteed.
+
+The scheduled workflow is **read-only**: no follows, likes, comments or profile changes. It uses six-second spacing between hashtag-read groups to avoid excessive request bursts, without evading challenges or rate limits; it immediately stops on an HTTP error. It never stores the Instagram session in the Git repository and reads the existing `IG_SESSION_JSON` / `IG_SESSION_GZIP_B64` Actions secret. It uses the `contents: read` GitHub token permission.
+
+Each run displays a **Summary** with links to each post and public profile, post age and the number of accounts found per hashtag. It also uploads `daily-review.json` and `daily-review.md` for review. The existing separate [single-account manual workflow](https://github.com/wampadu/instagram_runner/actions/workflows/manual-instagram.yml) is unchanged.
+
+---
+
 ## Manual GitHub Actions — newest to oldest, **no age cutoff**
 
 **[Run the Instagram workflow manually](https://github.com/wampadu/instagram_runner/actions/workflows/manual-instagram.yml).**

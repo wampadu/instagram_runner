@@ -1,4 +1,4 @@
-name: Instagram recent (24h) manual preview / follow and like
+name: Instagram manual: newest-first preview / one follow and like
 
 # MANUAL ONLY: no cron, push, or pull_request trigger.
 on:
@@ -17,13 +17,8 @@ on:
         required: true
         type: string
         default: follow_for_follow
-      max_age_hours:
-        description: 'Strict maximum age 1-24 hours; newest first, never older'
-        required: true
-        type: number
-        default: 24
       post_url:
-        description: 'OPTIONAL post/reel URL, must be no older than 24h. Empty = newest qualifying post.'
+        description: 'OPTIONAL post/reel URL; empty = newest verified post in returned sample.'
         required: false
         type: string
       confirm:
@@ -40,7 +35,7 @@ concurrency:
 
 jobs:
   manually-run:
-    name: Preview fresh posts or follow and like one
+    name: Preview newest-first posts or follow and like one
     runs-on: ubuntu-latest
     timeout-minutes: 9
     defaults:
@@ -65,7 +60,6 @@ jobs:
         env:
           RUN_MODE: ${{ inputs.mode }}
           IG_HASHTAG: ${{ inputs.hashtag }}
-          IG_MAX_AGE_HOURS: ${{ inputs.max_age_hours }}
           IG_POST_URL: ${{ inputs.post_url }}
           IG_CONFIRM: ${{ inputs.confirm }}
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
@@ -76,7 +70,6 @@ jobs:
           python -m scripts.manual_instagram_actions \
             --mode "$RUN_MODE" \
             --hashtag "$IG_HASHTAG" \
-            --hours "$IG_MAX_AGE_HOURS" \
             --post-url "$IG_POST_URL" \
             --max-pages 2 \
             --confirm "$IG_CONFIRM" \

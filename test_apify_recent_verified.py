@@ -1,6 +1,9 @@
 import unittest
+import json
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 from datetime import datetime, timezone
-from scripts.apify_recent_verified import normalize_rows, hashtag_in_caption, parse_timestamp
+from scripts.apify_recent_verified import normalize_rows, hashtag_in_caption, parse_timestamp, apify_recent_request
 
 
 class RecentApifyTests(unittest.TestCase):
@@ -51,3 +54,24 @@ class RecentApifyTests(unittest.TestCase):
 
     def test_timezone_required(self):
         self.assertIsNone(parse_timestamp("2026-11-07T01:00:00"))
+
+class ContractTests(unittest.TestCase):
+    def test_request_exact_recent_and_charge_cap(self):
+        class Response:
+            status = 201
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, max_bytes): return b'[]'
+        with patch("urllib.request.urlopen", return_value=Response()) as request_mock:
+            rows=apify_recent_request("dummy-apify-token","follow_for_follow",20,0.10)
+        self.assertEqual(rows,[])
+        request=request_mock.call_args.args[0]
+        url=urlsplit(request.full_url)
+        self.assertIn("coregent~instagram-hashtag-scraper",url.path)
+        self.assertEqual(parse_qs(url.query)["maxTotalChargeUsd"],["0.10"])
+        body=json.loads(request.data)
+        self.assertEqual(body["hashtags"],["follow_for_follow"])
+        self.assertEqual(body["sort"],"RECENT")
+        self.assertEqual(body["postsNewerThan"],"24 hours")
+        self.assertFalse(body["includeMediaUrls"])
+        self.assertEqual(request.get_method(),"POST")

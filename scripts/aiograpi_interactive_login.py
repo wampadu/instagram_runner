@@ -28,9 +28,18 @@ async def authenticate(client, username, password, initial_code, session_path=SE
     session_path.parent.mkdir(parents=True, exist_ok=True)
     if os.name != "nt":
         session_path.parent.chmod(0o700)
-    client.dump_settings(session_path)
     if os.name != "nt":
+        # Restrictive permissions apply from creation, not just afterward.
+        previous_umask = os.umask(0o077)
+        try:
+            if session_path.exists():
+                session_path.chmod(0o600)
+            client.dump_settings(session_path)
+        finally:
+            os.umask(previous_umask)
         session_path.chmod(0o600)
+    else:
+        client.dump_settings(session_path)
     return session_path
 
 def main():

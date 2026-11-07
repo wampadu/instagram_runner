@@ -188,3 +188,33 @@ bash discover_termux.sh followforfollow likeforlike --max-accounts 6 --per-accou
 
 The output contains verified post links, the post's public username, and hours since publication. Defaults: 6 public accounts per query, 5 posts per account, and an adjustable age limit (up to 168 hours). Queries that find zero matching posts are **not** proof that a hashtag has no recent posts. The saved session remains under `/root/.instagram_runner/` inside the Termux Debian environment; never upload or paste it publicly. The original `runner.py` remains separate and is not enabled to follow/like on this alternative discovery path.
 
+
+## Exact hashtag '#follow_for_follow' — 2026-11-06/07 investigation
+
+**Working Instagram login does not imply working chronological hashtag access.** Live read-only tests from Termux found:
+- `hashtag_info_v1("follow_for_follow")` returned a roughly 143,905 total media count.
+- The private `tags/follow_for_follow/sections/` endpoint returned `status=ok` but zero Top and Recent sections.
+- A limited account-first search of 12 public accounts inspected 61 posts and found zero *verified exact-tag* posts in the last 48 hours. This does NOT mean the tag has zero new posts.
+- Public keyword media search and public GraphQL did not supply usable current hashtag results; do not silently fall back to Top and call the result chronological.
+
+### New read-only API option — first 100 lookups/credits free, not forever free
+
+Two providers *advertise* a functioning `recent` hashtag feed, but have **not yet been live-tested with this particular tag** using an API key:
+
+- **Social Fetch**: `GET /v2/instagram/hashtags/follow_for_follow/media?tab=recent`, 100 one-time free credits. https://www.socialfetch.dev/
+- **Openhandle**: `GET /v1/instagram/hashtags/follow_for_follow/posts?sort=recent`, 100 one-time free requests. https://openhandle.dev/
+
+Both require their own API key; neither requires an Instagram password, session JSON, or Meta developer app. The new `scripts/hashtag_recent_provider.py` script only prints posts with timestamps inside your window **and an exact matching hashtag in the caption**, sorts them newest-first, and avoids duplicates. It does not like, follow, or log in to Instagram. The new parser passed offline tests, **not** a live provider lookup.
+
+Inside your existing Termux repo:
+
+```bash
+git pull --ff-only
+bash recent_provider_termux.sh socialfetch follow_for_follow
+# or, if you obtained an Openhandle key:
+bash recent_provider_termux.sh openhandle follow_for_follow
+```
+
+Enter the selected provider's API key **only in Termux**, when prompted invisibly. Do not paste a key or your existing Instagram session into chat, GitHub, an issue or a repository file. If no posts are shown, the provider may hide that hashtag too; this cannot be bypassed by treating ranked posts as recent.
+
+The working local account-first discovery remains available with `bash discover_termux.sh follow_for_follow --max-age-hours 48`, but **it is incomplete and not a hashtag-wide latest feed**. The existing write automation remains separate and disabled for these new read-only pathways.

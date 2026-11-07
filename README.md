@@ -273,3 +273,36 @@ bash apify_recent_termux.sh follow_for_follow
 Official provider documentation: https://apify.com/pricing ; https://apify.com/coregent/instagram-hashtag-scraper ; https://docs.apify.com/api/v2/actor-run-sync-get-dataset-items-get .
 
 **Do not confuse the independent Social Fetch `401` test with evidence about whether its hashtag feed exists:** that result establishes failed API authorization, not feed contents. The prior `recent_provider_termux.sh` remains experimental, not a confirmed solution. Apify credits are finite; test a few rows before considering ongoing automation.
+
+## Free official Meta Facebook Graph API — read-only Recent hashtag integration
+
+As of November 2026, Instagram API **with Facebook Login** supports hashtag lookup by IG Hashtag ID and a Recent media endpoint. Meta does not list a charge for API calls. The API **with Instagram Login** is different and does not support public hashtag discovery.
+
+### Before running
+- The Instagram account must be a **Business or Creator** account linked to a **Facebook Page** the Facebook user manages. On November 6, 2026, the owner's Instagram account **follow_back_aswell** was checked in the app and still showed **Switch to professional account**, so this account is currently personal. Do not convert without the owner's explicit choice; conversion can affect privacy/features.
+- Register an app in **Meta for Developers** with **Facebook Login** (not solely Instagram Login). The Facebook User access token should permit page access with pages_show_list, pages_read_engagement and instagram_basic.
+- Hashtag Search requires **Instagram Public Content Access** permission/feature, often gated behind **Meta App Review even for the account owner**. Denied permissions cannot be fixed by retrying requests.
+- The hashtag may be considered restricted/sensitive, and eligibility of **#follow_for_follow** remains untested.
+- Recent media includes public posts from approximately the **past 24 hours**, max 50/page, no author **username** field, and at most 30 unique hashtags per account in a rolling 7 days. Meta also does not provide follow/like actions on unrelated users through this API.
+
+### First: check linked Instagram account without using hashtag quota
+
+From Termux, enter:
+
+    cd ~/instagram_runner
+    git pull --ff-only
+    bash meta_graph_termux.sh --check-access
+
+Enter the **Facebook User Access Token** in the hidden terminal prompt. Do not enter Instagram/Facebook passwords, App Secret, saved Instagram session JSON or 2FA codes. The token is used via HTTPS Authorization header and is not printed, uploaded to the GitHub repo or saved by the script.
+
+The access check only calls Facebook Graph **/me/accounts**, then lists connected professional Instagram accounts. A personal account is not eligible.
+
+### Next: query official Recent hashtag posts (after review/permission access)
+
+    bash meta_graph_termux.sh --recent follow_for_follow
+
+The program calls **/ig_hashtag_search** then **/{hashtag-id}/recent_media**, validates exact caption hashtag, recent timestamp and official Instagram permalink, removes duplicates, and sorts returned records newest-first. A sorted page does not guarantee exhaustive timeline coverage.
+
+Implementation: scripts/meta_graph_recent.py. Five network-free unit tests passed on Android using test_meta_graph_recent.py. **No live Graph API hashtag lookup has succeeded yet**, because the user has not granted a professional Page-linked account and Meta Facebook User token. The app must have Instagram Public Content Access approval.
+
+Official references: https://developers.facebook.com/apps/ and https://developers.facebook.com/tools/explorer/ and https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api .

@@ -1,7 +1,7 @@
-"""Manually preview or like a configurable number of verified Instagram posts.
+"""Manually follow the author and like a configurable number of verified posts.
 
-Reuses the existing secret-backed session and hashtag verification.
-Never follows accounts or retries write operations.
+Reuses the existing session, exact-hashtag checks, and follow/like routine.
+Never automatically retries write operations.
 """
 import argparse
 import json
@@ -14,7 +14,7 @@ import time
 from scripts.instagram_web_recent import load_http, retrieve
 from scripts.instagram_web_recent_probe import TAG
 from scripts.manual_instagram_actions import (
-    SafeStop, check_target_media, make_client, private_session_path,
+    SafeStop, check_target_media, engagement, make_client, private_session_path,
 )
 
 MAX_LIKES_PER_RUN = 100
@@ -28,14 +28,16 @@ def markdown_report(report):
         f"- Hashtag: **#{report['hashtag']}**",
         f"- Requested new likes (IG_LIKE_COUNT): **{report['requested']}**",
         f"- Confirmed new likes: **{report['confirmed']}**",
+        f"- Confirmed new follows: **{report['follows_confirmed']}**",
+        f"- Already-followed/requested authors skipped: **{report['already_following']}**",
         f"- Already-liked posts skipped: **{report['already_liked']}**",
         f"- Other posts skipped: **{report['skipped']}**",
         "- Selection: newest verified posts first; no 24-hour cutoff",
-        "- Follows performed: **0**", "",
+        "",
         "| Post | Result |", "|---|---|",
     ]
     for item in report["results"]:
-        lines.append(f"| [View post]({item['url']}) | {item['status']} |")
+        lines.append(f"| [View post]({item['url']}) | {item['status']}" + (f" (follow: {item['follow']})" if item.get("follow") else "") + " |")
     if report["error"]:
         lines.extend(["", f"**Status:** {report['error']}"])
     lines.extend(["", "Only Instagram-confirmed likes count.",
@@ -61,7 +63,8 @@ def run(args):
     report = {
         "mode": args.mode, "hashtag": args.hashtag,
         "requested": args.count, "confirmed": 0, "already_liked": 0,
-        "skipped": 0, "results": [], "error": None,
+        "skipped": 0, "follows_confirmed": 0, "already_following": 0,
+        "results": [], "error": None,
     }
     try:
         if not TAG.fullmatch(args.hashtag):
@@ -90,8 +93,9 @@ def run(args):
                     })
                 if len(candidates) < args.count:
                     raise SafeStop(f"Only {len(candidates)} verified posts available.")
-            elif args.mode == "like":
+            elif args.mode == "follow_like":
                 client = make_client(session_path)
+                seen_authors = set()
                 for p in candidates:
                     if report["confirmed"] >= args.count:
                         break
@@ -118,6 +122,10 @@ def run(args):
                         item["status"] = "own_post_skipped"
                         report["skipped"] += 1
                         continue
+                    if target["uid"] in seen_authors:
+                        item["status"] = "duplicate_author_skipped"
+                        report["skipped"] += 1
+                        continue
                     state = getattr(media, "has_liked", None)
                     if state is True:
                         item["status"] = "already_liked"
@@ -128,23 +136,39 @@ def run(args):
                         report["skipped"] += 1
                         continue
                     try:
-                        confirmed = client.media_like(target["media_id"])
+                        relationship = client.user_friendship_v1(target["uid"])
                     except Exception as exc:
-                        item["status"] = "uncertain"
                         raise SafeStop(
-                            "Like uncertain (" + type(exc).__name__ +
-                            "); stopped without retry."
+                            "Could not verify follow state (" + type(exc).__name__ + ")."
                         ) from None
-                    if confirmed is not True:
-                        item["status"] = "unconfirmed"
-                        raise SafeStop("Instagram did not confirm like; stopped without retry.")
-                    item["status"] = "confirmed"
-                    report["confirmed"] += 1
+                    if relationship is None:
+                        raise SafeStop("Follow state unavailable; stopped without writes.")
+                    if (getattr(relationship, "following", False) or
+                            getattr(relationship, "outgoing_request", False)):
+                        item["status"] = "already_following_or_requested"
+                        report["already_following"] += 1
+                        continue
+                    seen_authors.add(target["uid"])
+                    outcome = engagement(
+                        client, code, args.hashtag, expected_user=target["username"]
+                    )
+                    item["follow"] = outcome.get("follow", "not_attempted")
+                    item["like"] = outcome.get("like", "not_attempted")
+                    item["status"] = outcome.get("like", "not_attempted")
+                    if item["follow"] == "confirmed":
+                        report["follows_confirmed"] += 1
+                    if item["like"] == "confirmed":
+                        report["confirmed"] += 1
+                    if outcome.get("error") or item["follow"] != "confirmed" or item["like"] != "confirmed":
+                        raise SafeStop(
+                            "Follow/like did not fully confirm; stopped without retry."
+                        )
                     if report["confirmed"] < args.count:
                         time.sleep(random.uniform(4, 8))
-                if report["confirmed"] < args.count:
+                if report["confirmed"] < args.count or report["follows_confirmed"] < args.count:
                     raise SafeStop(
-                        f"Only {report['confirmed']} of {args.count} new likes confirmed."
+                        f"Only {report['follows_confirmed']} follows and "
+                        f"{report['confirmed']} likes confirmed of {args.count} requested."
                     )
             else:
                 raise SafeStop("Unknown mode.")
@@ -162,7 +186,7 @@ def run(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=["preview", "like"], default="preview")
+    parser.add_argument("--mode", choices=["preview", "follow_like"], default="preview")
     parser.add_argument("--count", type=int, default=os.environ.get("IG_LIKE_COUNT", "2"))
     parser.add_argument("--hashtag", default="followforfollow")
     parser.add_argument("--max-pages", type=int, choices=[1, 2, 3], default=3)

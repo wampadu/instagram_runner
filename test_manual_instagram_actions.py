@@ -182,13 +182,65 @@ class ManualWorkflowTests(unittest.TestCase):
              patch("scripts.manual_instagram_actions.retrieve",return_value=(
                  [{"code":"OLD","username":"someuser","age":30}],[{"http":"200","raw":1}])), \
              patch("scripts.manual_instagram_actions.make_client",return_value=self.client) as make, \
+             patch("scripts.manual_instagram_actions.choose_new_post",
+                   return_value={"code":"OLD","username":"someuser","age":30}) as choose, \
              patch("scripts.manual_instagram_actions.engagement",return_value={"follow":"confirmed","like":"confirmed"}) as action, \
              patch("scripts.manual_instagram_actions.save_report") as save:
             self.assertEqual(run(args),0)
             make.assert_called_once()
+            choose.assert_called_once()
             self.assertEqual(save.call_args.args[0]["candidates"][0]["age"],30)
             self.assertEqual(action.call_args.args[1],"OLD")
 
+
+    def test_original_one_post_skips_existing_and_selects_next(self):
+        from scripts.manual_instagram_actions import choose_new_post
+
+        now = datetime.now(timezone.utc) - timedelta(hours=2)
+        media = {
+            "ALREADY": NS(
+                code="ALREADY", id="1_111111111", taken_at=now,
+                caption_text="Hey #follow_for_follow", has_liked=True,
+                user=NS(pk="111111111", username="already", is_private=False),
+            ),
+            "FOLLOWING": NS(
+                code="FOLLOWING", id="2_222222222", taken_at=now,
+                caption_text="Hey #follow_for_follow", has_liked=False,
+                user=NS(pk="222222222", username="following", is_private=False),
+            ),
+            "NEW": NS(
+                code="NEW", id="3_333333333", taken_at=now,
+                caption_text="Hey #follow_for_follow", has_liked=False,
+                user=NS(pk="333333333", username="newauthor", is_private=False),
+            ),
+        }
+        client = NS(
+            user_id="999999",
+            media_pk_from_code=MagicMock(side_effect=lambda code: code),
+            media_info=MagicMock(side_effect=lambda code, use_cache: media[code]),
+            user_friendship_v1=MagicMock(side_effect=lambda uid: NS(
+                following=(uid == "222222222"), outgoing_request=False,
+            )),
+        )
+        eligible = [
+            {"code": "ALREADY", "username": "already", "age": 1},
+            {"code": "FOLLOWING", "username": "following", "age": 2},
+            {"code": "NEW", "username": "newauthor", "age": 3},
+        ]
+        report = {}
+        selected = choose_new_post(client, eligible, "follow_for_follow", report)
+        self.assertEqual(selected["code"], "NEW")
+        self.assertEqual(report["skipped_existing"], 2)
+        self.assertEqual(report["skipped_unverified"], 0)
+
+    def test_original_one_post_stops_if_all_existing(self):
+        from scripts.manual_instagram_actions import choose_new_post
+
+        self.media.has_liked = True
+        with self.assertRaisesRegex(SafeStop, "No unliked posts"):
+            choose_new_post(self.client, [
+                {"code": "ABC123", "username": "public.author", "age": 1}
+            ], "follow_for_follow", {})
 
     def test_preview_includes_all_rows_even_more_than_fifteen(self):
         @contextlib.contextmanager

@@ -202,7 +202,11 @@ def fetch_feed_candidates(session_path, hashtag, max_pages=2):
             distinct[code] = item
     return sorted(distinct.values(), key=lambda item: item["age"])
 def run(args):
-    """Work in blocks of 20 verified pairs; stop on shortfall without fake counts."""
+    """Engage verified new authors in 20-pair hashtag batches.
+
+    Skip exhausted hashtags rather than counting missing engagements as successes.
+    A bounded second pass can use fresh, still-untried candidates from earlier tags.
+    """
     count = args.target_count
     report = {
         "requested": count, "confirmed_likes": 0, "confirmed_follows": 0,
@@ -213,67 +217,100 @@ def run(args):
             raise SafeStop("Target count must be between 1 and 100.")
         if not TAG.fullmatch(args.hashtag):
             raise SafeStop("Invalid starting hashtag.")
-        current_pool = [args.hashtag] + [t for t in HASHTAG_POOL if t != args.hashtag]
+        current_pool = [args.hashtag] + [
+            tag for tag in HASHTAG_POOL if tag != args.hashtag
+        ]
         with private_session_path() as session_path:
             client = make_client(session_path)
             seen_posts, seen_authors = set(), set()
-            remaining = count
-            for tag in current_pool:
-                if remaining <= 0:
+            # A finite limit prevents repeated polling when no useful posts remain.
+            for pass_number in range(1, 6):
+                if report["confirmed_likes"] >= count:
                     break
-                quota = min(20, remaining)
-                batch = {
-                    "hashtag": tag, "requested": quota,
-                    "confirmed_likes": 0, "confirmed_follows": 0,
-                    "available": 0,
-                }
-                report["batches"].append(batch)
-                try:
-                    candidates = fetch_feed_candidates(
-                        session_path, tag, args.max_pages
-                    )
-                except SafeStop:
-                    raise
-                except Exception as exc:
-                    raise SafeStop(
-                        f"Feed read failed for #{tag} ({type(exc).__name__})."
-                    ) from None
-                batch["available"] = len(candidates)
-                for p in candidates:
-                    if batch["confirmed_likes"] >= quota:
+                progress_in_pass = 0
+                for tag in current_pool:
+                    remaining = count - report["confirmed_likes"]
+                    if remaining <= 0:
                         break
-                    code, username = p.get("code"), p.get("username")
-                    if (not isinstance(code, str) or not isinstance(username, str)
-                            or not USER_RE.fullmatch(username)
-                            or code in seen_posts or username.lower() in seen_authors):
-                        report["skipped"] += 1
-                        continue
-                    seen_posts.add(code)
-                    seen_authors.add(username.lower())
-                    result, succeeded = execute_single_engagement(
-                        client, code, tag, expected_user=username
-                    )
-                    report["results"].append(result)
-                    if result.get("follow") == "confirmed":
-                        report["confirmed_follows"] += 1
-                        batch["confirmed_follows"] += 1
-                    if result.get("like") == "confirmed":
-                        report["confirmed_likes"] += 1
-                        batch["confirmed_likes"] += 1
-                    if result.get("error"):
-                        raise SafeStop(
-                            "One write was unconfirmed for #" + tag +
-                            "; stopped without retry."
+                    quota = min(20, remaining)
+                    batch = {
+                        "pass": pass_number, "hashtag": tag, "requested": quota,
+                        "confirmed_likes": 0, "confirmed_follows": 0,
+                        "available": 0, "skipped": 0, "status": "pending",
+                    }
+                    report["batches"].append(batch)
+                    try:
+                        candidates = fetch_feed_candidates(
+                            session_path, tag, args.max_pages
                         )
-                    if not succeeded:
-                        report["skipped"] += 1
-                if batch["confirmed_likes"] < quota or batch["confirmed_follows"] < quota:
-                    raise SafeStop(
-                        f"Only {batch['confirmed_likes']}/{quota} new likes and "
-                        f"{batch['confirmed_follows']}/{quota} new follows on #{tag}. "
-                        "The next hashtag was not started."
+                    except SafeStop:
+                        # A failed/blocked HTTP retrieval is not an empty feed.
+                        raise
+                    except Exception as exc:
+                        raise SafeStop(
+                            f"Feed read failed for #{tag} ({type(exc).__name__})."
+                        ) from None
+                    batch["available"] = len(candidates)
+                    if not candidates:
+                        batch["status"] = "no_candidates"
+                        continue
+                    for item in candidates:
+                        if batch["confirmed_likes"] >= quota:
+                            break
+                        code, username = item.get("code"), item.get("username")
+                        if (not isinstance(code, str)
+                                or not isinstance(username, str)
+                                or not USER_RE.fullmatch(username)
+                                or code in seen_posts
+                                or username.lower() in seen_authors):
+                            report["skipped"] += 1
+                            batch["skipped"] += 1
+                            continue
+                        # Do not repeat a post or author, even if the first read
+                        # found that they were already followed or liked.
+                        seen_posts.add(code)
+                        seen_authors.add(username.lower())
+                        outcome, succeeded = execute_single_engagement(
+                            client, code, tag, expected_user=username
+                        )
+                        report["results"].append(outcome)
+                        if outcome.get("follow") == "confirmed":
+                            report["confirmed_follows"] += 1
+                            batch["confirmed_follows"] += 1
+                        if outcome.get("like") == "confirmed":
+                            report["confirmed_likes"] += 1
+                            batch["confirmed_likes"] += 1
+                        if outcome.get("error"):
+                            batch["status"] = "unconfirmed_write"
+                            raise SafeStop(
+                                "One follow or like was not confirmed for #" + tag +
+                                "; stopped without replaying the action."
+                            )
+                        if succeeded:
+                            progress_in_pass += 1
+                        else:
+                            report["skipped"] += 1
+                            batch["skipped"] += 1
+                    batch["status"] = (
+                        "complete" if batch["confirmed_likes"] == quota
+                        else "partial_or_exhausted"
                     )
-                remaining -= quota
+                    # Missing engagements never increase the global counter.
+                    # Continue to the next hashtag, carrying the unmet target.
+                if report["confirmed_likes"] >= count:
+                    break
+                if progress_in_pass == 0:
+                    raise SafeStop(
+                        "No more eligible new follow-and-like pairs found "
+                        "across the available hashtags; remaining target: " +
+                        str(count - report["confirmed_likes"]) + "."
+                    )
+            if report["confirmed_likes"] < count:
+                raise SafeStop(
+                    "Stopped after five hashtag passes with " +
+                    str(report["confirmed_likes"]) + "/" + str(count) +
+                    " confirmed new likes; no missing actions were counted."
+                )
     except SafeStop as exc:
         report["error"] = str(exc)
     except Exception as exc:
@@ -291,17 +328,21 @@ def run(args):
             f"- Confirmed new follows: {report['confirmed_follows']}",
             f"- Confirmed new likes: {report['confirmed_likes']}",
             f"- Skipped: {report['skipped']}", "",
-            "| Hashtag | Target | New follows | New likes | Candidates |",
-            "|---|---:|---:|---:|---:|",
+            "| Pass | Hashtag | Target | New follows | New likes | Candidates | Status |",
+            "|---:|---|---:|---:|---:|---:|---|",
         ]
         for batch in report["batches"]:
             summary_lines.append(
-                f"| #{batch['hashtag']} | {batch['requested']} "
+                f"| {batch['pass']} | #{batch['hashtag']} | {batch['requested']} "
                 f"| {batch['confirmed_follows']} | {batch['confirmed_likes']} "
-                f"| {batch['available']} |"
+                f"| {batch['available']} | {batch['status']} |"
             )
         if report["error"]:
             summary_lines.append("\n**Stopped:** " + report["error"])
+        summary_lines.append(
+            "\nUnconfirmed writes are not retried. Missing posts do not "
+            "advance the count."
+        )
         summary = "\n".join(summary_lines) + "\n"
         (target / "results.md").write_text(summary, encoding="utf-8")
         if os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -315,6 +356,8 @@ def run(args):
         print("Stopped:", report["error"])
         return 2
     return 0
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--hashtag", default="followforfollow")

@@ -25,7 +25,7 @@ jobs:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
           IG_2FA_CODE: ${{ secrets.IG_2FA_CODE }}
-          IG_PROXY: ${{ secrets.IG_PROXY }}
+          # Authentication-only workflow deliberately never uses public proxies.
         shell: bash
         run: |
           python - <<'PY'
@@ -40,7 +40,7 @@ jobs:
           logging.disable(logging.CRITICAL)
           username = os.environ.get('IG_USERNAME', '').strip().lstrip('@')
           password = os.environ.get('IG_PASSWORD', '')
-          proxy = os.environ.get('IG_PROXY', '').strip()
+          proxy = ''  # Direct connection for authentication; other workflows unchanged.
           if not username or not password:
               print('Configuration error: missing IG_USERNAME or IG_PASSWORD repository secret.')
               sys.exit(1)

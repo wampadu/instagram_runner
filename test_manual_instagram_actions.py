@@ -43,7 +43,7 @@ class ManualWorkflowTests(unittest.TestCase):
         self.assertIsNone(post_code_from_url("http://www.instagram.com/p/ABC123/"))
 
     def test_exact_one_follow_and_one_like(self):
-        result=engagement(self.client,"ABC123","follow_for_follow",6,expected_user="public.author")
+        result=engagement(self.client,"ABC123","follow_for_follow",24,expected_user="public.author")
         self.assertEqual(result["follow"],"confirmed")
         self.assertEqual(result["like"],"confirmed")
         self.client.user_follow.assert_called_once_with("987654321")
@@ -51,27 +51,27 @@ class ManualWorkflowTests(unittest.TestCase):
 
     def test_no_follow_when_already_following_but_like_still_works(self):
         self.client.user_friendship_v1.return_value=NS(following=True,outgoing_request=False)
-        result=engagement(self.client,"ABC123","follow_for_follow",6)
+        result=engagement(self.client,"ABC123","follow_for_follow",24)
         self.assertEqual(result["follow"],"already_following")
         self.assertEqual(result["like"],"confirmed")
         self.client.user_follow.assert_not_called()
 
     def test_already_liked_is_not_resent(self):
         self.media.has_liked=True
-        result=engagement(self.client,"ABC123","follow_for_follow",6)
+        result=engagement(self.client,"ABC123","follow_for_follow",24)
         self.assertEqual(result["like"],"already_liked")
         self.client.media_like.assert_not_called()
 
     def test_follow_unconfirmed_stops_like(self):
         self.client.user_follow.return_value=False
-        result=engagement(self.client,"ABC123","follow_for_follow",6)
+        result=engagement(self.client,"ABC123","follow_for_follow",24)
         self.assertEqual(result["follow"],"unconfirmed")
         self.assertEqual(result["like"],"not_attempted")
         self.client.media_like.assert_not_called()
 
     def test_follow_error_does_not_retry_or_like(self):
         self.client.user_follow.side_effect=TimeoutError("sensitive token")
-        result=engagement(self.client,"ABC123","follow_for_follow",6)
+        result=engagement(self.client,"ABC123","follow_for_follow",24)
         self.assertEqual(result["follow"],"uncertain")
         self.assertEqual(result["like"],"not_attempted")
         self.assertNotIn("sensitive token",repr(result))
@@ -86,7 +86,7 @@ class ManualWorkflowTests(unittest.TestCase):
         ]:
             saved={k:getattr(self.media,k) for k in invalid}
             for k,v in invalid.items():setattr(self.media,k,v)
-            result=engagement(self.client,"ABC123","follow_for_follow",6,
+            result=engagement(self.client,"ABC123","follow_for_follow",24,
                               expected_user="public.author")
             self.assertEqual(result["follow"],"not_attempted")
             self.assertEqual(result["like"],"not_attempted")
@@ -94,9 +94,9 @@ class ManualWorkflowTests(unittest.TestCase):
             self.client.media_like.assert_not_called()
             for k,v in saved.items():setattr(self.media,k,v)
 
-    def test_rejects_post_older_than_six_hours(self):
-        self.media.taken_at=datetime.now(timezone.utc)-timedelta(hours=7)
-        result=engagement(self.client,"ABC123","follow_for_follow",6)
+    def test_rejects_post_older_than_24_hours(self):
+        self.media.taken_at=datetime.now(timezone.utc)-timedelta(hours=25)
+        result=engagement(self.client,"ABC123","follow_for_follow",24)
         self.assertEqual(result["follow"],"not_attempted")
         self.assertEqual(result["like"],"not_attempted")
         self.client.user_follow.assert_not_called()
@@ -104,7 +104,7 @@ class ManualWorkflowTests(unittest.TestCase):
 
     def test_self_follow_rejected(self):
         self.client.user_id="987654321"
-        result=engagement(self.client,"ABC123","follow_for_follow",6)
+        result=engagement(self.client,"ABC123","follow_for_follow",24)
         self.assertEqual(result["follow"],"not_attempted")
         self.client.user_follow.assert_not_called()
 
@@ -129,7 +129,7 @@ class ManualWorkflowTests(unittest.TestCase):
         @contextlib.contextmanager
         def fake_session():
             yield Path("/tmp/fake-ig-private.json")
-        args=NS(mode="preview",hashtag="follow_for_follow",hours=6,max_pages=1,
+        args=NS(mode="preview",hashtag="follow_for_follow",hours=24,max_pages=1,
                 confirm="",post_url="",output_dir="")
         with patch("scripts.manual_instagram_actions.private_session_path",fake_session), \
              patch("scripts.manual_instagram_actions.load_http",return_value=object()), \
@@ -144,8 +144,53 @@ class ManualWorkflowTests(unittest.TestCase):
             self.assertEqual(report["discovery"]["eligible"],1)
             self.assertIsNone(report["engagement"])
 
+    def test_preview_filters_older_than_24_hours_and_sorts_newest_first(self):
+        @contextlib.contextmanager
+        def fake_session():
+            yield Path("/tmp/fake-ig-private.json")
+        args=NS(mode="preview",hashtag="follow_for_follow",hours=24,max_pages=1,
+                confirm="",post_url="",output_dir="")
+        # Deliberately unsorted; Instagram's response order is not trusted.
+        records=[
+            {"code":"OLD","username":"olduser","age":24.1},
+            {"code":"SECOND","username":"second","age":9.0},
+            {"code":"NEW","username":"newest","age":0.25},
+            {"code":"FIRST","username":"first","age":3.2},
+            {"code":"NEGATIVE","username":"wrong","age":-1.0},
+        ]
+        with patch("scripts.manual_instagram_actions.private_session_path",fake_session), \
+             patch("scripts.manual_instagram_actions.load_http",return_value=object()), \
+             patch("scripts.manual_instagram_actions.retrieve",return_value=(
+                 records,[{"http":"200","raw":len(records)}])), \
+             patch("scripts.manual_instagram_actions.make_client") as make, \
+             patch("scripts.manual_instagram_actions.save_report") as save:
+            self.assertEqual(run(args),0)
+            make.assert_not_called()
+            report=save.call_args.args[0]
+            self.assertEqual(report["discovery"]["eligible"],3)
+            self.assertEqual([p["username"] for p in report["candidates"]],
+                             ["newest","first","second"])
+            self.assertNotIn("olduser",str(report["candidates"]))
+
+    def test_no_fallback_when_only_older_posts_exist(self):
+        @contextlib.contextmanager
+        def fake_session():
+            yield Path("/tmp/fake-ig-private.json")
+        args=NS(mode="follow_like",hashtag="follow_for_follow",hours=24,max_pages=1,
+                confirm="FOLLOW_AND_LIKE",post_url="",output_dir="")
+        with patch("scripts.manual_instagram_actions.private_session_path",fake_session), \
+             patch("scripts.manual_instagram_actions.load_http",return_value=object()), \
+             patch("scripts.manual_instagram_actions.retrieve",return_value=(
+                 [{"code":"OLD","username":"someuser","age":30}],[{"http":"200","raw":1}])), \
+             patch("scripts.manual_instagram_actions.make_client") as make, \
+             patch("scripts.manual_instagram_actions.save_report") as save:
+            self.assertEqual(run(args),2)
+            make.assert_not_called()
+            self.assertEqual(save.call_args.args[0]["candidates"],[])
+            self.assertIn("24 hours",save.call_args.args[0]["error"])
+
     def test_execute_requires_confirmation_before_session_or_writes(self):
-        args=NS(mode="follow_like",hashtag="follow_for_follow",hours=6,max_pages=1,
+        args=NS(mode="follow_like",hashtag="follow_for_follow",hours=24,max_pages=1,
                 confirm="",post_url="",output_dir="")
         with patch("scripts.manual_instagram_actions.private_session_path") as secret, \
              patch("scripts.manual_instagram_actions.save_report") as save:

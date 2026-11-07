@@ -1,0 +1,96 @@
+name: Instagram manual preview / follow and like
+
+# MANUAL ONLY: no cron, push, or pull_request trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Preview posts OR follow one author and like one post'
+        required: true
+        type: choice
+        options:
+          - preview
+          - follow_like
+        default: preview
+      hashtag:
+        description: 'Exact hashtag, with or without # (not all recent posts may appear)'
+        required: true
+        type: string
+        default: follow_for_follow
+      max_age_hours:
+        description: 'Maximum age 1-168 hours'
+        required: true
+        type: number
+        default: 168
+      post_url:
+        description: 'OPTIONAL Instagram post/reel URL. Empty = newest verified post in sample.'
+        required: false
+        type: string
+      confirm:
+        description: 'To follow+like, type FOLLOW_AND_LIKE; otherwise leave blank'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instagram-manual-one-account
+  cancel-in-progress: false
+
+jobs:
+  manually-run:
+    name: Preview or perform one follow and one like
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned Instagram client
+        run: |
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Offline tests (no Instagram network or writes)
+        run: |
+          python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent test_manual_instagram_actions
+      - name: Find verified posts / optionally execute one follow and one like
+        id: instagram
+        continue-on-error: true
+        env:
+          RUN_MODE: ${{ inputs.mode }}
+          IG_HASHTAG: ${{ inputs.hashtag }}
+          IG_MAX_AGE_HOURS: ${{ inputs.max_age_hours }}
+          IG_POST_URL: ${{ inputs.post_url }}
+          IG_CONFIRM: ${{ inputs.confirm }}
+          IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
+          IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ig-report"
+          python -m scripts.manual_instagram_actions \
+            --mode "$RUN_MODE" \
+            --hashtag "$IG_HASHTAG" \
+            --hours "$IG_MAX_AGE_HOURS" \
+            --post-url "$IG_POST_URL" \
+            --max-pages 2 \
+            --confirm "$IG_CONFIRM" \
+            --output-dir "$RUNNER_TEMP/ig-report"
+      - name: Publish result JSON and Markdown (NO session data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-manual-results-${{ github.run_id }}
+          path: ${{ runner.temp }}/ig-report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Reflect Instagram result in job status
+        if: steps.instagram.outcome == 'failure'
+        run: |
+          echo 'Instagram preview/engagement failed; see the job Summary and results artifact.' >&2
+          exit 1

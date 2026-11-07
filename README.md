@@ -1,36 +1,28 @@
-## NEW — Manual GitHub Actions: preview, follow one account, like one post
+## Manual GitHub Actions — newest to oldest, **no age cutoff**
 
-[Open **Instagram manual preview / follow and like** in GitHub Actions](https://github.com/wampadu/instagram_runner/actions/workflows/manual-instagram.yml)
+**[Run the Instagram workflow manually](https://github.com/wampadu/instagram_runner/actions/workflows/manual-instagram.yml).**
 
-**This workflow runs ONLY when you click Run workflow.** No cron, no push trigger, no automatic likes/follows. It combines the tested free web `recent` hashtag reader with the `instagrapi==3.2.6` account client. Each execution makes **at most one follow request and one like request**, using that post's actual author and exact media ID, after checking the post caption and timestamp. It has a Preview-only default. All write exceptions stop the job; no automatic replay.
+The GitHub Actions workflow discovers posts matching an exact Instagram hashtag using your saved session and Instagram's web `tab=recent` feed, verifies their captions and publication timestamps, **keeps all returned verified posts regardless of age**, and sorts them **newest to oldest**. No 6-hour, 24-hour, or seven-day age restriction is applied. We cannot control which posts Instagram supplies, only sort the sampled posts it returns. Multiple pages may be available, and a sorted sample is not guaranteed to be a complete chronological hashtag timeline.
 
-### One-time session setup — keep your credentials private
+- **Preview (default):** Shows all verified posts in the sampled results, including older posts, newest to oldest, with clickable links and publication ages. Does not like/follow anyone.
+- **follow_like:** Selects the newest verified post in the sample or an explicitly provided Instagram post URL, re-verifies its caption, actual author and timestamp, then attempts **at most one follow and one like** after the `FOLLOW_AND_LIKE` confirmation. It **does not reject a post solely because it is older than 24 hours**. It avoids automatic retries and reports actual confirmed/unconfirmed statuses.
+- **Reports:** The GitHub Actions run Summary shows all matched posts and any engagement results. A downloadable JSON/Markdown artifact is also produced. The workflow is **manual only**, with no schedule.
 
-GitHub Actions runs on **GitHub-hosted servers**, not inside your phone's Termux. The working Instagram login is saved **only on your phone** in `~/.instagram_runner/aiograpi-session.json`. You must supply it as an **encrypted GitHub Actions repository secret**, not as a committed file or workflow input.
+### Private session configuration
 
-1. Open [Settings → Secrets and variables → Actions → New repository secret](https://github.com/wampadu/instagram_runner/settings/secrets/actions/new).
-2. Secret **Name**: `IG_SESSION_JSON`.
-3. Secret **Value**: the entire contents of your **local** `~/.instagram_runner/aiograpi-session.json` file. In Termux, you can open it with `cat ~/.instagram_runner/aiograpi-session.json`, select/copy the full JSON *privately on your own phone*, then paste it into the GitHub Secret value field. Never paste it into chat, an issue, a workflow input, public repository files, or Actions logs. Click **Add secret**.
-4. This token is highly sensitive and can grant account access; it is accessible to GitHub Actions running with this repository's trusted workflow permissions. Keep your repository access restricted. You can delete/revoke it later in repository Settings. GitHub may ask for new Instagram verification when the same session runs from a different IP/network. **Do not disable account security or repeatedly retry rejected sessions.**
+GitHub-hosted runs use the encrypted repository secret `IG_SESSION_JSON` (or `IG_SESSION_GZIP_B64`) for the existing Instagram session. The session must never be committed to your repository or pasted into a chat. If needed, open [Settings → Secrets and variables → Actions](https://github.com/wampadu/instagram_runner/settings/secrets/actions) to check that the secret exists. Running from GitHub's network may require an Instagram security check even if Termux works.
 
-An optional compressed secret named `IG_SESSION_GZIP_B64` is also supported for sessions larger than GitHub's 48 KB secret limit; it takes precedence if both secrets exist.
+### Termux read-only alternative
 
-### Manual run and results
+```bash
+cd ~/instagram_runner
+git pull --ff-only
+bash recent_web_termux.sh follow_for_follow
+```
 
-Click **Actions → Instagram manual preview / follow and like → Run workflow**, then choose:
+Without an age argument, the Termux command also **keeps all verified posts and sorts newest to oldest**. You can optionally pass a number of hours as a second argument only if you explicitly want to filter, e.g., `bash recent_web_termux.sh toronto 24`.
 
-- **Preview** (default) — enter an exact hashtag (e.g. `follow_for_follow` or `followforfollow`), choose an age limit from 1–24 hours (default 24), and run. It displays only exact-tag posts within the age cutoff, sorted **newest to oldest**, with verified links, authors, ages and retrieval counts, but makes no account changes.
-- **follow_like** — enter a post permalink from Preview in **post_url** to choose the exact target (recommended). If empty, it picks the newest verified eligible sampled post. Set **confirm** to `FOLLOW_AND_LIKE` and run. It verifies the post, checks whether you already follow the account or have liked the post, and attempts **one follow + one like**, returning `confirmed`, `already_following`, `already_liked`, `uncertain`, etc. Do not automatically retry any uncertain action.
-
-Open the workflow run's **Summary** for results, or download its `instagram-manual-results-...` artifact containing `results.md` and `results.json`. Neither artifact includes your session.
-
-**Validated on the phone:** 15 offline unit tests passed and Preview found 4 posts within seven days under `#follow_for_follow`, but **none within the strict 24-hour cutoff**. A separate live **READ-ONLY preflight** on one verified post succeeded: account authenticated, post/author/hashtag/age checked, friendship state and liked state readable, zero write actions performed. **The GitHub-hosted Preview workflow was run successfully**. The one-follow/one-like write still has not been tested. Posts older than 24 hours are never selected, even if explicitly linked. The session may fail in GitHub's cloud because its network differs from your phone.
-
-CLI alternatives from Termux (after `git pull --ff-only`): `python -m scripts.manual_instagram_actions --mode preview --hashtag follow_for_follow --hours 24` inside Debian's `venv-instagrapi`, or `python -m scripts.manual_preflight https://www.instagram.com/p/SHORTCODE/ --tag follow_for_follow` for a read-only check.
-
-**Age policy:** Only posts 0–24 hours old are eligible, sorted newest first based on publication timestamp. If the sampled feed has none, Preview shows zero and follow_like stops without falling back to older posts. The age is rechecked immediately before any account action.
-
-**Safety:** No bulk follow/like loops, no proxy rotation or challenge bypass, no background schedules. Repeated manual runs are independent; Instagram's own current follow/like state is checked, but there is no persistent cloud ledger between runs. This is an unofficial automation that Instagram may restrict. The website's recent tab does **not** guarantee a complete chronological hashtag feed.
+**Note:** Instagram's unofficial endpoints can change or restrict access. Neither sorting nor a successful preview guarantees a like/follow will succeed. Automated writes are not retried after uncertain outcomes, and the repository does not yet retain an across-run engagement ledger.
 
 ---
 

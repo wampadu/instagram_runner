@@ -33,29 +33,59 @@ jobs:
           import io
           import logging
           import os
+          import socket
           import sys
+          from urllib.parse import urlsplit
 
           logging.disable(logging.CRITICAL)
           username = os.environ.get('IG_USERNAME', '').strip().lstrip('@')
           password = os.environ.get('IG_PASSWORD', '')
+          proxy = os.environ.get('IG_PROXY', '').strip()
           if not username or not password:
-              print('Missing IG_USERNAME or IG_PASSWORD repository secret.')
+              print('Configuration error: missing IG_USERNAME or IG_PASSWORD repository secret.')
               sys.exit(1)
+
+          # Print only fixed diagnostic labels, never raw upstream exception text,
+          # request URLs, proxy hostnames, usernames, credentials or session data.
+          print('Python runtime: ' + sys.version.split()[0])
+          print('Proxy configured: ' + ('yes' if proxy else 'no'))
+          stage = 'network preflight'
           try:
-              # Discard upstream output so only the sanitized result is logged.
+              if proxy:
+                  parsed = urlsplit(proxy)
+                  if parsed.scheme not in ('http', 'https', 'socks4', 'socks5', 'socks5h') or not parsed.hostname:
+                      raise ValueError('Invalid proxy URL')
+                  host = parsed.hostname
+                  port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+              else:
+                  host, port = 'i.instagram.com', 443
+              with socket.create_connection((host, port), timeout=8):
+                  pass
+              print('TCP connectivity preflight: passed')
+          except Exception as exc:
+              print('Failed stage: ' + stage)
+              print('Error class: ' + type(exc).__name__)
+              print('No Instagram login or engagement actions were attempted.')
+              sys.exit(1)
+
+          try:
+              stage = 'client initialization'
               with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                   from instagrapi import Client
                   client = Client(with_challenge_flow=False)
                   client.set_retry_config(session_retry_total=0, public_request_retries_count=1)
-                  if os.environ.get('IG_PROXY'):
-                      client.set_proxy(os.environ['IG_PROXY'])
+                  if proxy:
+                      client.set_proxy(proxy)
+                  stage = 'Instagram login'
                   client.login(username, password, verification_code=os.environ.get('IG_2FA_CODE', '').strip())
+                  stage = 'account_info'
                   info = client.account_info()
                   if info.username.lower() != username.lower():
                       raise RuntimeError('Account mismatch')
           except Exception as exc:
-              print('Authentication stopped: ' + type(exc).__name__)
-              print('No follow/like actions were attempted. Resolve challenges in Instagram; do not repeatedly rerun.')
+              print('Failed stage: ' + stage)
+              print('Error class: ' + type(exc).__name__)
+              print('No follow/like actions were attempted. If challenged, resolve it in Instagram before another test.')
               sys.exit(1)
           print('Authentication passed. No follow/like actions were attempted; no session was exported.')
           PY

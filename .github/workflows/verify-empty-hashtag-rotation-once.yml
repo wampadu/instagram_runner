@@ -1,4 +1,5 @@
 name: Verify Instagram skip empty hashtag rotation (offline)
+# Regression retest after correcting expected repeat pass.
 on:
   push:
     paths:

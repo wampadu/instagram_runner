@@ -24,7 +24,7 @@ proot-distro login debian --shared-home -- bash -lc '
   cd /root/instagram_runner
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq ca-certificates git python3 python3-pip python3-venv
+  apt-get install -y -qq --no-install-recommends ca-certificates git python3 python3-pip python3-venv
   mkdir -p /root/.instagram_runner
   chmod 700 /root/.instagram_runner
   python3 -m venv /root/.instagram_runner/venv-debian

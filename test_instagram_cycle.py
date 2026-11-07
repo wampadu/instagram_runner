@@ -66,8 +66,10 @@ class CycleTests(unittest.TestCase):
         with patch("scripts.manual_instagram_actions.private_session_path", self.session), \
              patch("scripts.manual_instagram_actions.make_client", return_value=self.client), \
              patch("scripts.manual_instagram_actions.fetch_feed_candidates", side_effect=fetch), \
-             patch("scripts.manual_instagram_actions.execute_single_engagement", side_effect=outcomes):
+             patch("scripts.manual_instagram_actions.execute_single_engagement", side_effect=outcomes), \
+             patch("scripts.manual_instagram_actions.time.sleep") as cooldown:
             status = run(args)
+            self.cooldown_seconds = [call.args[0] for call in cooldown.call_args_list]
         return status, calls
 
     def test_argument_parsing_no_mode(self):
@@ -93,6 +95,32 @@ class CycleTests(unittest.TestCase):
         status, calls = self.invoke(self.args(100))
         self.assertEqual(status, 0)
         self.assertEqual(calls, list(HASHTAG_POOL))
+
+    def test_cooldown_after_fifty_confirmed_pairs_only(self):
+        status, _ = self.invoke(self.args(51))
+        self.assertEqual(status, 0)
+        self.assertEqual(len(self.cooldown_seconds), 1)
+        self.assertGreaterEqual(self.cooldown_seconds[0], 600)
+        self.assertLessEqual(self.cooldown_seconds[0], 780)
+
+    def test_no_cooldown_before_fifty_or_after_final_pair(self):
+        for count in (2, 49, 50):
+            with self.subTest(count=count):
+                status, _ = self.invoke(self.args(count))
+                self.assertEqual(status, 0)
+                self.assertEqual(self.cooldown_seconds, [])
+
+    def test_one_cooldown_on_hundred_pairs_not_two(self):
+        status, _ = self.invoke(self.args(100))
+        self.assertEqual(status, 0)
+        self.assertEqual(len(self.cooldown_seconds), 1)
+
+    def test_no_cooldown_if_only_skipped_or_no_confirmed_actions(self):
+        def skip(client, code, tag, expected_user):
+            return {"follow": "already_following", "like": "already_liked"}, False
+        status, _ = self.invoke(self.args(51), outcomes=skip)
+        self.assertEqual(status, 2)
+        self.assertEqual(self.cooldown_seconds, [])
 
     def test_partial_hashtag_carries_remaining_target_to_next(self):
         status, calls = self.invoke(self.args(21), candidates_per_tag=19)

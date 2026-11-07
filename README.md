@@ -156,3 +156,18 @@ The GitHub Actions login test can install the client, but **cannot privately ans
 
 **Security:** Never commit, upload, paste, or email the session file or any 2FA code. The script does not enable automated likes/follows, and successful login alone does not prove that recent hashtag retrieval works. Complete any Instagram security challenge in the official app, and do not repeatedly retry rejected logins.
 
+
+## Android / Termux interactive login (no laptop)
+
+Run this on a trusted Android phone with Termux installed (prefer Termux from F-Droid). In Termux, paste these commands one line at a time:
+
+```sh
+pkg install -y git
+git clone https://github.com/wampadu/instagram_runner.git
+cd instagram_runner
+bash login_termux.sh
+```
+
+The script installs the pinned upstream `aiograpi` development revision, then prompts for your username and password privately in Termux. If Instagram asks for a verification code, enter a **fresh** code in Termux, not in chat or GitHub. Do not reuse an expired code. A successful authenticated API read saves session settings to `~/.instagram_runner/aiograpi-session.json` on the phone. Never upload or share that file. The session is **not** automatically transferred to GitHub Actions; GitHub-hosted runners may still face verification and separate IP/device checks.
+
+**Limitations:** Termux installation of `aiograpi`'s compiled Python dependencies can fail on Android/ARM even when Windows/Linux installation succeeds. The Termux installer has not yet been tested on your particular phone. Do not keep retrying authentication after a challenge or rejection. This login setup does not enable likes/follows or verify newest hashtag results.

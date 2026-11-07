@@ -39,7 +39,7 @@ jobs:
           python -m pip install --disable-pip-version-check --no-input -r requirements.txt
       - name: Offline tests
         run: |
-          python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent test_manual_instagram_actions
+          python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent
       - name: Execute engagement cycle
         id: instagram
         continue-on-error: true

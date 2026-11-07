@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install aiograpi
-        run: python -m pip install --disable-pip-version-check 'aiograpi==2.1.2'
+        run: python -m pip install --disable-pip-version-check 'git+https://github.com/subzeroid/aiograpi.git@872039d37a61e5d60e07d47d3a230eafc23085e8'
       - name: Import and interface smoke test
         run: |
           python - <<'PY'
@@ -47,7 +47,7 @@ jobs:
           print("Login parameters:", ", ".join(inspect.signature(Client.login).parameters))
           PY
       - name: One real login and authenticated read (no proxy, no writes)
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.test_login) || (github.event_name == 'push' && github.event.head_commit.message == 'One-shot sanitized aiograpi traceback diagnostic') }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.test_login) || (github.event_name == 'push' && github.event.head_commit.message == 'One-shot upstream password key fix validation') }}
         env:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}

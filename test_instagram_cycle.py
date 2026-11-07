@@ -46,10 +46,14 @@ class CycleTests(unittest.TestCase):
         def fetch(session_path, tag, max_pages):
             calls.append(tag)
             index = HASHTAG_POOL.index(tag)
+            available = (
+                candidates_per_tag.get(tag, 24)
+                if isinstance(candidates_per_tag, dict) else candidates_per_tag
+            )
             return [
                 {"code": f"{index}POST{i}", "username": f"author{index}_{i}",
                  "age": float(i)}
-                for i in range(candidates_per_tag)
+                for i in range(available)
             ]
 
         if outcomes is None:
@@ -90,10 +94,27 @@ class CycleTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(calls, list(HASHTAG_POOL))
 
-    def test_insufficient_posts_stop_no_invented_count(self):
+    def test_partial_hashtag_carries_remaining_target_to_next(self):
         status, calls = self.invoke(self.args(21), candidates_per_tag=19)
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, list(HASHTAG_POOL[:2]))
+
+    def test_empty_fourth_hashtag_moves_to_fifth_then_cycles_back(self):
+        available = {tag: 25 for tag in HASHTAG_POOL}
+        available["follow4follow"] = 0
+        status, calls = self.invoke(self.args(100), candidates_per_tag=available)
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, list(HASHTAG_POOL) + list(HASHTAG_POOL[:2]))
+
+    def test_all_hashtags_empty_stops_after_one_pass(self):
+        status, calls = self.invoke(self.args(20), candidates_per_tag=0)
         self.assertEqual(status, 2)
-        self.assertEqual(calls, ["followforfollow"])
+        self.assertEqual(calls, list(HASHTAG_POOL))
+
+    def test_no_false_success_after_all_candidates_exhausted(self):
+        status, calls = self.invoke(self.args(100), candidates_per_tag=1)
+        self.assertEqual(status, 2)
+        self.assertEqual(calls, list(HASHTAG_POOL) * 2)
 
     def test_error_in_follow_cannot_count_as_pair(self):
         def fail(client, code, tag, expected_user):

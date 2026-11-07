@@ -1,4 +1,4 @@
-name: Instagram manual preview / follow and like
+name: Instagram recent (6h) manual preview / follow and like
 
 # MANUAL ONLY: no cron, push, or pull_request trigger.
 on:
@@ -18,12 +18,12 @@ on:
         type: string
         default: follow_for_follow
       max_age_hours:
-        description: 'Maximum age 1-168 hours'
+        description: 'Strict maximum age 1-6 hours; never use older posts'
         required: true
         type: number
-        default: 168
+        default: 6
       post_url:
-        description: 'OPTIONAL Instagram post/reel URL. Empty = newest verified post in sample.'
+        description: 'OPTIONAL post/reel URL, must be younger than 6h. Empty = newest qualifying post.'
         required: false
         type: string
       confirm:
@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   manually-run:
-    name: Preview or perform one follow and one like
+    name: Preview fresh posts or follow and like one
     runs-on: ubuntu-latest
     timeout-minutes: 9
     defaults:

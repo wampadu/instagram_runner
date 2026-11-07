@@ -33,7 +33,6 @@ POST_URL_RE = re.compile(
 )
 USER_RE = re.compile(r"^[A-Za-z0-9_.]{1,30}$")
 EXACT = "FOLLOW_AND_LIKE"
-FRESH_MAX_HOURS = 24  # Absolute ceiling for previews and all write actions.
 
 
 class SafeStop(Exception):
@@ -60,8 +59,8 @@ def age_hours(value, now=None):
     return (now - value.astimezone(timezone.utc)).total_seconds() / 3600
 
 
-def check_target_media(media, code, tag, max_hours, expected_user=None):
-    """Validate an authenticated read before permitting ANY write."""
+def check_target_media(media, code, tag, max_hours=None, expected_user=None):
+    """Validate an authenticated read before permitting ANY write. Age cutoff is unused."""
     if getattr(media, "code", None) != code:
         raise SafeStop("Media shortcode verification failed.")
     user = getattr(media, "user", None)
@@ -78,8 +77,8 @@ def check_target_media(media, code, tag, max_hours, expected_user=None):
     if not contains_tag(getattr(media, "caption_text", None), tag):
         raise SafeStop("Post caption does not contain the exact requested hashtag.")
     age = age_hours(getattr(media, "taken_at", None))
-    if age is None or not 0 <= age <= min(max_hours, FRESH_MAX_HOURS):
-        raise SafeStop("Post timestamp is outside the allowed age window.")
+    if age is None or age < 0:
+        raise SafeStop("Post timestamp is invalid or in the future.")
     media_id = getattr(media, "id", None)
     if not isinstance(media_id, str) or not re.fullmatch(r"[0-9]+_[0-9]+", media_id):
         raise SafeStop("Media ID is missing or unexpected.")
@@ -144,7 +143,7 @@ def make_client(session_path):
     return cl
 
 
-def engagement(client, code, tag, max_hours, expected_user=None):
+def engagement(client, code, tag, max_hours=None, expected_user=None):
     """At most one follow request, then one like request. No automatic retries."""
     result = {"follow": "not_attempted", "like": "not_attempted"}
     try:
@@ -205,7 +204,7 @@ def markdown_report(report):
         "",
         f"- Mode: **{report['mode']}**",
         f"- Exact hashtag: **#{report['hashtag']}**",
-        f"- Max age: **{report['max_age_hours']} hours**",
+        "- Sorting: **newest to oldest (no age cutoff)**",
     ]
     if report.get("error"):
         lines.append("- Status: **Stopped — " + html.escape(report["error"]) + "**")
@@ -215,12 +214,12 @@ def markdown_report(report):
             f"- Pages: **{discovery.get('pages',0)}**",
             f"- Candidates: **{discovery.get('raw',0)}**",
             f"- Verified exact-hashtag posts: **{discovery.get('verified',0)}**",
-            f"- Eligible by age: **{discovery.get('eligible',0)}**",
+            f"- Displayed verified posts: **{discovery.get('eligible',0)}**",
         ])
     if report.get("candidates"):
         lines.extend(["", "## Recent verified posts (newest to oldest)", "",
                       "| Author | Age | Instagram link |","|---|---:|---|"])
-        for c in report["candidates"][:15]:
+        for c in report["candidates"]:
             user=c.get("username") or "(unknown)"
             if not USER_RE.fullmatch(user):
                 user="(unavailable)"
@@ -257,12 +256,10 @@ def save_report(report, output_dir):
 
 def run(args):
     result = {
-        "mode":args.mode, "hashtag":args.hashtag,"max_age_hours":args.hours,
+        "mode":args.mode, "hashtag":args.hashtag,
         "candidates":[],"engagement":None,"error":None,
     }
     try:
-        if not 1 <= args.hours <= FRESH_MAX_HOURS:
-            raise SafeStop("Only posts from the last 24 hours are allowed; older posts are never used.")
         if args.mode == "follow_like" and args.confirm != EXACT:
             raise SafeStop("To engage, set confirmation to FOLLOW_AND_LIKE.")
         with private_session_path() as session_path:
@@ -278,13 +275,13 @@ def run(args):
                 result["discovery"]={
                     "pages":len(pages), "raw":sum(p["raw"] for p in pages),
                     "verified":len(records),
-                    "eligible":sum(0 <= c["age"] <= min(args.hours,FRESH_MAX_HOURS) for c in records),
+                    "eligible":sum(c["age"] >= 0 for c in records),
                     "http_statuses":[p["http"] for p in pages],
                 }
                 if failed:
                     raise SafeStop("Instagram web feed unavailable: "+",".join(failed))
-                eligible=sorted( (c for c in records if 0 <= c["age"] <= min(args.hours,FRESH_MAX_HOURS)), key=lambda c: c["age"] )
-                for c in eligible[:15]:
+                eligible=sorted((c for c in records if c["age"] >= 0), key=lambda c: c["age"])
+                for c in eligible:
                     username=c["username"] if USER_RE.fullmatch(c["username"]) else "(unavailable)"
                     result["candidates"].append({
                         "username":username,"age":c["age"],
@@ -293,12 +290,12 @@ def run(args):
                 if args.mode=="follow_like":
                     picked=next((c for c in eligible if USER_RE.fullmatch(c["username"])),None)
                     if not picked:
-                        raise SafeStop("No exact-hashtag post from the last 24 hours; no older post will be used.")
+                        raise SafeStop("No verified exact-hashtag post available to select.")
                     post_code=picked["code"]
             if args.mode=="follow_like":
                 client=make_client(session_path)
                 result["engagement"]=engagement(
-                    client,post_code,args.hashtag,args.hours,
+                    client,post_code,args.hashtag,None,
                     expected_user=picked["username"] if picked else None,
                 )
                 if result["engagement"].get("error"):
@@ -324,13 +321,12 @@ def parse_args():
     p.add_argument("--hashtag",default="follow_for_follow")
     p.add_argument("--post-url",default="",help="Optional exact Instagram URL; bypasses discovery in follow_like mode")
     p.add_argument("--max-pages",type=int,choices=[1,2,3],default=2)
-    p.add_argument("--hours",type=int,default=24)
     p.add_argument("--confirm",default="")
     p.add_argument("--output-dir",default="")
     args=p.parse_args()
     args.hashtag=args.hashtag.lower().lstrip("#")
-    if not TAG.fullmatch(args.hashtag) or not 1<=args.hours<=FRESH_MAX_HOURS:
-        p.error("Use one valid hashtag and a strictly enforced age window of 1..24 hours")
+    if not TAG.fullmatch(args.hashtag):
+        p.error("Use one valid hashtag name")
     return args
 
 

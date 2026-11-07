@@ -45,7 +45,7 @@ jobs:
           IG_2FA_CODE: ${{ secrets.IG_2FA_CODE }}
         run: |
           python - <<'PY'
-          import contextlib, io, logging, os, sys
+          import asyncio, contextlib, io, logging, os, sys
           logging.disable(logging.CRITICAL)
           user = os.environ.get("IG_USERNAME", "").strip().lstrip("@")
           password = os.environ.get("IG_PASSWORD", "")
@@ -62,7 +62,7 @@ jobs:
                   stage = "login"
                   client.login(user, password, verification_code=os.environ.get("IG_2FA_CODE", "").strip())
                   stage = "account_info"
-                  info = client.account_info()
+                  info = asyncio.run(client.account_info())
                   if info.username.lower() != user.lower():
                       raise RuntimeError("Account mismatch")
           except Exception as exc:

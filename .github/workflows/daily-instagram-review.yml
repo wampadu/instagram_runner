@@ -1,0 +1,83 @@
+name: 'Instagram daily five-hashtag discovery (read-only)'
+
+# Automated DISCOVERY ONLY. No automatic follow, like, or comment actions.
+on:
+  schedule:
+    - cron: '0 13 * * *'
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instagram-daily-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Review up to 20 unique accounts per hashtag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Select 9 AM Toronto schedule (DST aware)
+        id: window
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CRON_EXPRESSION: ${{ github.event.schedule }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta
+          import os
+          from zoneinfo import ZoneInfo
+          toronto = datetime.now(ZoneInfo("America/Toronto"))
+          utc_hour = 13 if toronto.utcoffset() == timedelta(hours=-4) else 14
+          expected = f"0 {utc_hour} * * *"
+          selected = os.environ["EVENT_NAME"] == "workflow_dispatch" or os.environ.get("CRON_EXPRESSION") == expected
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print("run=" + ("true" if selected else "false"), file=out)
+          print("Toronto date:", toronto.strftime("%Y-%m-%d %Z"), "target 09:00; job selected:", selected)
+          PY
+      - name: Checkout repository
+        if: steps.window.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - name: Install Python
+        if: steps.window.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        if: steps.window.outputs.run == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Run offline tests
+        if: steps.window.outputs.run == 'true'
+        run: |
+          python -m unittest -v test_daily_hashtag_review test_instagram_web_recent test_instagram_web_recent_probe
+      - name: Collect verified posts for review (zero account actions)
+        if: steps.window.outputs.run == 'true'
+        id: candidates
+        continue-on-error: true
+        env:
+          IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
+          IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ig-daily-review"
+          python -m scripts.daily_hashtag_review \
+            --output-dir "$RUNNER_TEMP/ig-daily-review" \
+            --max-pages 3 \
+            --read-spacing-seconds 6
+      - name: Upload read-only results
+        if: always() && steps.window.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-daily-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/ig-daily-review/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report failed retrieval
+        if: steps.candidates.outcome == 'failure'
+        run: |
+          echo 'Some hashtag requests failed. No account was followed or liked. See the Summary.'
+          exit 1

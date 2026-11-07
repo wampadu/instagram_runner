@@ -82,7 +82,7 @@ class ManualWorkflowTests(unittest.TestCase):
         for invalid in [
             {"caption_text":"#followforfollow"},
             {"user":NS(pk="987654321",username="another",is_private=False)},
-            {"taken_at":datetime.now(timezone.utc)-timedelta(days=10)},
+            {"taken_at":datetime.now(timezone.utc)+timedelta(hours=1)},
         ]:
             saved={k:getattr(self.media,k) for k in invalid}
             for k,v in invalid.items():setattr(self.media,k,v)
@@ -94,13 +94,13 @@ class ManualWorkflowTests(unittest.TestCase):
             self.client.media_like.assert_not_called()
             for k,v in saved.items():setattr(self.media,k,v)
 
-    def test_rejects_post_older_than_24_hours(self):
-        self.media.taken_at=datetime.now(timezone.utc)-timedelta(hours=25)
-        result=engagement(self.client,"ABC123","follow_for_follow",24)
-        self.assertEqual(result["follow"],"not_attempted")
-        self.assertEqual(result["like"],"not_attempted")
-        self.client.user_follow.assert_not_called()
-        self.client.media_like.assert_not_called()
+    def test_older_valid_post_can_be_selected_for_one_manual_action(self):
+        self.media.taken_at=datetime.now(timezone.utc)-timedelta(days=21)
+        result=engagement(self.client,"ABC123","follow_for_follow")
+        self.assertEqual(result["follow"],"confirmed")
+        self.assertEqual(result["like"],"confirmed")
+        self.client.user_follow.assert_called_once()
+        self.client.media_like.assert_called_once()
 
     def test_self_follow_rejected(self):
         self.client.user_id="987654321"
@@ -144,7 +144,7 @@ class ManualWorkflowTests(unittest.TestCase):
             self.assertEqual(report["discovery"]["eligible"],1)
             self.assertIsNone(report["engagement"])
 
-    def test_preview_filters_older_than_24_hours_and_sorts_newest_first(self):
+    def test_preview_keeps_older_posts_and_sorts_newest_first(self):
         @contextlib.contextmanager
         def fake_session():
             yield Path("/tmp/fake-ig-private.json")
@@ -167,12 +167,11 @@ class ManualWorkflowTests(unittest.TestCase):
             self.assertEqual(run(args),0)
             make.assert_not_called()
             report=save.call_args.args[0]
-            self.assertEqual(report["discovery"]["eligible"],3)
+            self.assertEqual(report["discovery"]["eligible"],4)
             self.assertEqual([p["username"] for p in report["candidates"]],
-                             ["newest","first","second"])
-            self.assertNotIn("olduser",str(report["candidates"]))
+                             ["newest","first","second","olduser"])
 
-    def test_no_fallback_when_only_older_posts_exist(self):
+    def test_selects_newest_even_when_it_is_older_than_24_hours(self):
         @contextlib.contextmanager
         def fake_session():
             yield Path("/tmp/fake-ig-private.json")
@@ -182,12 +181,35 @@ class ManualWorkflowTests(unittest.TestCase):
              patch("scripts.manual_instagram_actions.load_http",return_value=object()), \
              patch("scripts.manual_instagram_actions.retrieve",return_value=(
                  [{"code":"OLD","username":"someuser","age":30}],[{"http":"200","raw":1}])), \
-             patch("scripts.manual_instagram_actions.make_client") as make, \
+             patch("scripts.manual_instagram_actions.make_client",return_value=self.client) as make, \
+             patch("scripts.manual_instagram_actions.engagement",return_value={"follow":"confirmed","like":"confirmed"}) as action, \
              patch("scripts.manual_instagram_actions.save_report") as save:
-            self.assertEqual(run(args),2)
-            make.assert_not_called()
-            self.assertEqual(save.call_args.args[0]["candidates"],[])
-            self.assertIn("24 hours",save.call_args.args[0]["error"])
+            self.assertEqual(run(args),0)
+            make.assert_called_once()
+            self.assertEqual(save.call_args.args[0]["candidates"][0]["age"],30)
+            self.assertEqual(action.call_args.args[1],"OLD")
+
+
+    def test_preview_includes_all_rows_even_more_than_fifteen(self):
+        @contextlib.contextmanager
+        def fake_session():
+            yield Path("/tmp/fake-ig-private.json")
+        args=NS(mode="preview",hashtag="follow_for_follow",max_pages=2,
+                confirm="",post_url="",output_dir="")
+        records=[
+            {"code":f"CODE{i}", "username":f"account{i}", "age":float(100-i)}
+            for i in range(40)
+        ]
+        with patch("scripts.manual_instagram_actions.private_session_path",fake_session), \
+             patch("scripts.manual_instagram_actions.load_http",return_value=object()), \
+             patch("scripts.manual_instagram_actions.retrieve",return_value=(records,[{"http":"200","raw":40}])), \
+             patch("scripts.manual_instagram_actions.save_report") as save:
+            self.assertEqual(run(args),0)
+            report=save.call_args.args[0]
+            self.assertEqual(len(report["candidates"]),40)
+            self.assertEqual([x["age"] for x in report["candidates"]], sorted(x["age"] for x in records))
+            self.assertEqual(markdown_report(report).count("[View post]"),40)
+
 
     def test_execute_requires_confirmation_before_session_or_writes(self):
         args=NS(mode="follow_like",hashtag="follow_for_follow",hours=24,max_pages=1,

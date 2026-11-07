@@ -57,7 +57,7 @@ def verified(media, tag):
     if age < 0:
         return None
     user=media.get("user") or {}
-    return {"code":code, "age":round(age,2),
+    return {"code":code, "age":age,
             "username":str(user.get("username") or "(unavailable)")}
 
 

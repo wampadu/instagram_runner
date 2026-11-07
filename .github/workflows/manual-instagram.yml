@@ -1,16 +1,17 @@
 name: 'Instagram Automated — Loop and Engagement'
 
-# Runs automatically at 9:00 AM UTC daily, plus manual trigger support.
+# Runs at 9 AM Toronto daily (DST-aware) and accepts manual dispatch.
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
       hashtag:
         description: 'Override starting hashtag (optional)'
         required: false
         type: string
-        default: 'follow_for_follow'
+        default: 'followforfollow'
 
 permissions:
   contents: read
@@ -23,43 +24,69 @@ jobs:
   automated-run:
     name: Cycle hashtags and engage target count
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
     steps:
+      - name: Select Toronto 9 AM run
+        id: schedule_window
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CRON_EXPRESSION: ${{ github.event.schedule }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          import os
+          toronto = datetime.now(ZoneInfo("America/Toronto"))
+          hour_utc = 13 if toronto.dst() != timedelta(0) else 14
+          scheduled = (
+              os.environ["EVENT_NAME"] == "schedule" and
+              os.environ.get("CRON_EXPRESSION") == f"0 {hour_utc} * * *"
+          )
+          should_run = os.environ["EVENT_NAME"] == "workflow_dispatch" or scheduled
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              print("run=" + str(should_run).lower(), file=out)
+          print("Toronto date:", toronto.strftime("%Y-%m-%d %Z"),
+                "processing:", should_run)
+          PY
       - name: Checkout repository
+        if: steps.schedule_window.outputs.run == 'true'
         uses: actions/checkout@v4
       - name: Install Python
+        if: steps.schedule_window.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install pinned Instagram client
+        if: steps.schedule_window.outputs.run == 'true'
         run: |
           python -m pip install --disable-pip-version-check --no-input -r requirements.txt
       - name: Offline tests
+        if: steps.schedule_window.outputs.run == 'true'
         run: |
-          python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent
+          python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent test_instagram_cycle
       - name: Execute engagement cycle
+        if: steps.schedule_window.outputs.run == 'true'
         id: instagram
         continue-on-error: true
         env:
-          # Pulls target count from your repository variable (default to 5 if not found)
-          TARGET_COUNT: ${{ vars.IG_LIKE_FOLLOW || 5 }}
-          IG_HASHTAG: ${{ inputs.hashtag || 'follow_for_follow' }}
+          # Confirmed NEW follow+like pairs; defaults to two when unset.
+          TARGET_COUNT: ${{ vars.IG_LIKE_COUNT || '2' }}
+          IG_HASHTAG: ${{ inputs.hashtag || 'followforfollow' }}
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
           IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
         run: |
           umask 077
           mkdir -p "$RUNNER_TEMP/ig-report"
           python -m scripts.manual_instagram_actions \
-            --mode "follow_like" \
             --hashtag "$IG_HASHTAG" \
             --target-count "$TARGET_COUNT" \
             --max-pages 3 \
             --output-dir "$RUNNER_TEMP/ig-report"
       - name: Publish result JSON and Markdown
-        if: always()
+        if: always() && steps.schedule_window.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: instagram-automated-results-${{ github.run_id }}
@@ -67,7 +94,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Reflect Instagram result in job status
-        if: steps.instagram.outcome == 'failure'
+        if: steps.schedule_window.outputs.run == 'true' && steps.instagram.outcome == 'failure'
         run: |
           echo 'Instagram workflow processing failed.' >&2
           exit 1

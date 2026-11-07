@@ -1,0 +1,24 @@
+name: Validate Instagram cycle repair (offline only)
+
+on:
+  push:
+    paths:
+      - '.github/workflows/validate-cycle-one-time.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Regression tests - no Instagram network or writes
+        run: python -m unittest -v test_instagram_cycle test_instagram_web_recent_probe test_instagram_web_recent
+      - name: Verify live command parsing only (no live run)
+        run: python -m scripts.manual_instagram_actions --help

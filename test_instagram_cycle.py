@@ -210,6 +210,43 @@ class CycleTests(unittest.TestCase):
         self.assertEqual(outcome["follow"], "unconfirmed")
         self.client.media_like.assert_not_called()
 
+    def test_instagram_feedback_required_stops_follow_without_retry(self):
+        class FeedbackRequired(Exception):
+            pass
+
+        self.client.user_follow.side_effect = FeedbackRequired("blocked")
+        with patch("scripts.manual_instagram_actions.time.sleep"):
+            outcome, success = execute_single_engagement(
+                self.client, "POST1", "followforfollow",
+                expected_user="other_person"
+            )
+        self.assertFalse(success)
+        self.assertEqual(outcome["follow"], "blocked")
+        self.assertEqual(outcome["like"], "not_attempted")
+        self.assertEqual(
+            outcome["restriction"], "instagram_action_restriction"
+        )
+        self.assertIn("FeedbackRequired", outcome["error"])
+        self.client.user_follow.assert_called_once()
+        self.client.media_like.assert_not_called()
+
+    def test_instagram_feedback_required_on_like_stops_without_retry(self):
+        class FeedbackRequired(Exception):
+            pass
+
+        self.client.media_like.side_effect = FeedbackRequired("blocked")
+        with patch("scripts.manual_instagram_actions.time.sleep"):
+            outcome, success = execute_single_engagement(
+                self.client, "POST1", "followforfollow",
+                expected_user="other_person"
+            )
+        self.assertFalse(success)
+        self.assertEqual(outcome["follow"], "confirmed")
+        self.assertEqual(outcome["like"], "blocked")
+        self.assertIn("FeedbackRequired", outcome["error"])
+        self.client.user_follow.assert_called_once()
+        self.client.media_like.assert_called_once()
+
     def test_verified_link_points_to_correct_post(self):
         target = check_target_media(self.media, "POST1", "followforfollow")
         self.assertEqual(target["url"], "https://www.instagram.com/p/POST1/")

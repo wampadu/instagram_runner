@@ -1,15 +1,16 @@
-"""Map GitHub's UTC cron triggers to five local Toronto Instagram sessions.
+"""Select exactly one Toronto Instagram slot from a GitHub Actions cron.
 
-Two cron hours are scheduled for each local time (EST/EDT); the incorrect
-seasonal UTC hour becomes a no-op. Manual runs choose an explicit slot.
+GitHub supports 'timezone: America/Toronto' in each schedule entry, so the
+cron's HOUR is a local hour, including across daylight saving changes.
+Each slot has a primary attempt at :11 and a backup at :36. The backup must
+pass a separate GitHub run-history guard before running live actions.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import os
 import re
 from zoneinfo import ZoneInfo
 
 TORONTO = ZoneInfo("America/Toronto")
-# One hashtag per session. Five sessions are requested, despite "four" in prose.
 SLOTS = {
     5: ("5am", "followforfollow"),
     9: ("9am", "likeforlike"),
@@ -18,53 +19,44 @@ SLOTS = {
     22: ("10pm", "like4like"),
 }
 MANUAL_SLOTS = {slot: (hour, hashtag) for hour, (slot, hashtag) in SLOTS.items()}
-# 10 paired cron hours; only five match Toronto local clock on a given day.
-UTC_CRON_HOURS = (2, 3, 9, 10, 13, 14, 19, 20, 22, 23)
-MAX_SCHEDULE_DELAY = timedelta(hours=3)
+PRIMARY_MINUTE = 11
+BACKUP_MINUTE = 36
+MAX_DELAY = timedelta(hours=2)
 
 
-def select_session(event_name, cron_expression="", manual_slot="5am", now_utc=None):
-    """Return a fixed run/slot/hashtag decision; no Instagram access."""
+def select_session(event_name, cron_expression="", manual_slot="5am", now=None):
+    """Pure selection logic; no network, no Instagram calls."""
+    current = (now or datetime.now(TORONTO)).astimezone(TORONTO)
     if event_name == "workflow_dispatch":
         if manual_slot not in MANUAL_SLOTS:
             raise ValueError("Unknown manual Instagram session slot")
         hour, hashtag = MANUAL_SLOTS[manual_slot]
-        return {"run": True, "slot": manual_slot, "hour": hour, "hashtag": hashtag}
-
+        return {
+            "run": True, "slot": manual_slot, "hour": hour,
+            "hashtag": hashtag, "local_date": current.strftime("%Y-%m-%d"),
+            "kind": "manual",
+        }
     if event_name != "schedule":
         return {"run": False, "reason": "not_schedule_or_dispatch"}
-    match = re.fullmatch(r"0 (\d{1,2}) \* \* \*", cron_expression or "")
-    if not match:
-        return {"run": False, "reason": "unrecognized_cron"}
-    utc_hour = int(match.group(1))
-    if utc_hour not in UTC_CRON_HOURS:
-        return {"run": False, "reason": "unrecognized_hour"}
 
-    now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    # A scheduled 10 PM Toronto session occurs at 02:00/03:00 UTC the next
-    # calendar day, so identify the UTC cron event rather than using today
-    # in Toronto to guess the associated UTC date.
-    events = [
-        datetime.combine(
-            (now + timedelta(days=offset)).date(),
-            datetime.min.time(), tzinfo=timezone.utc
-        ).replace(hour=utc_hour)
-        for offset in (-1, 0, 1)
+    match = re.fullmatch(r"(11|36) (5|9|15|18|22) \* \* \*", cron_expression or "")
+    if not match:
+        return {"run": False, "reason": "unknown_cron"}
+    minute, hour = map(int, match.groups())
+    candidates = [
+        (current + timedelta(days=day)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+        for day in (-1, 0, 1)
     ]
-    triggered = min(events, key=lambda event: abs(event - now))
-    if abs(now - triggered) > MAX_SCHEDULE_DELAY:
-        return {"run": False, "reason": "stale_cron_event"}
-    local = triggered.astimezone(TORONTO)
-    slot = SLOTS.get(local.hour)
-    if not slot or local.minute != 0:
-        return {"run": False, "reason": "wrong_dst_hour"}
+    scheduled = min(candidates, key=lambda d: abs(d - current))
+    if current - scheduled > MAX_DELAY or current < scheduled - timedelta(minutes=2):
+        return {"run": False, "reason": "stale_or_early_trigger"}
+    slot, tag = SLOTS[hour]
     return {
-        "run": True,
-        "slot": slot[0],
-        "hour": local.hour,
-        "hashtag": slot[1],
-        "local_date": local.strftime("%Y-%m-%d"),
-        "local_timezone": local.tzname(),
+        "run": True, "slot": slot, "hour": hour, "hashtag": tag,
+        "local_date": scheduled.strftime("%Y-%m-%d"),
+        "kind": "backup" if minute == BACKUP_MINUTE else "primary",
     }
 
 
@@ -74,26 +66,25 @@ def main():
         os.environ.get("CRON_EXPRESSION", ""),
         os.environ.get("MANUAL_SLOT", "5am"),
     )
-    print("Session decision:", decision)
-    output = os.environ.get("GITHUB_OUTPUT")
-    if output:
-        with open(output, "a", encoding="utf-8") as handle:
-            for key in ("run", "slot", "hashtag"):
-                value = decision.get(key, "")
+    print("Toronto session decision:", decision)
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            for field in ("run", "slot", "hashtag", "local_date", "kind"):
+                value = decision.get(field, "")
                 if isinstance(value, bool):
                     value = str(value).lower()
-                handle.write(f"{key}={value}\n")
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as handle:
+                output.write(f"{field}={value}\n")
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
             if decision["run"]:
-                handle.write(
-                    f"Instagram session: **{decision['slot']} Toronto** · "
-                    f"**#{decision['hashtag']}** · maximum 20 new follow+like pairs\n"
+                output.write(
+                    f"Instagram {decision['kind']} schedule: "
+                    f"**{decision['slot']} Toronto**, "
+                    f"**#{decision['hashtag']}**, max **20** pairs.\n"
                 )
             else:
-                handle.write(
-                    f"UTC trigger skipped: {decision.get('reason', 'unspecified')}\n"
+                output.write(
+                    f"Skipped schedule: {decision.get('reason', 'unknown')}\n"
                 )
 
 

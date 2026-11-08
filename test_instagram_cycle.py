@@ -80,6 +80,15 @@ class CycleTests(unittest.TestCase):
             args = parse_args()
             self.assertEqual(args.target_count, 2)
             self.assertEqual(args.hashtag, "followforfollow")
+            self.assertFalse(args.single_hashtag)
+        with patch("sys.argv", [
+            "manual_instagram_actions", "--hashtag", "like4like",
+            "--target-count", "20", "--single-hashtag"
+        ]):
+            args = parse_args()
+            self.assertEqual(args.target_count, 20)
+            self.assertTrue(args.single_hashtag)
+            self.assertEqual(args.hashtag, "like4like")
 
     def test_default_two_pairs_only_first_hashtag(self):
         status, calls = self.invoke(self.args(2))
@@ -95,6 +104,28 @@ class CycleTests(unittest.TestCase):
         status, calls = self.invoke(self.args(100))
         self.assertEqual(status, 0)
         self.assertEqual(calls, list(HASHTAG_POOL))
+
+    def test_one_hashtag_session_exactly_twenty_and_no_rotation(self):
+        args = self.args(20, "likeforlike")
+        args.single_hashtag = True
+        status, calls = self.invoke(args)
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, ["likeforlike"])
+        self.assertEqual(self.cooldown_seconds, [])
+
+    def test_single_hashtag_does_not_fall_back_if_empty(self):
+        args = self.args(20, "follow4follow")
+        args.single_hashtag = True
+        status, calls = self.invoke(args, candidates_per_tag=0)
+        self.assertEqual(status, 2)
+        self.assertEqual(calls, ["follow4follow"])
+
+    def test_single_hashtag_over_twenty_fails_before_network(self):
+        args = self.args(21, "like4like")
+        args.single_hashtag = True
+        with patch("scripts.manual_instagram_actions.private_session_path") as secret:
+            self.assertEqual(run(args), 2)
+            secret.assert_not_called()
 
     def test_cooldown_after_fifty_confirmed_pairs_only(self):
         status, _ = self.invoke(self.args(51))

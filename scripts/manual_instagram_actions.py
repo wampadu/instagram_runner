@@ -399,9 +399,10 @@ def run(args):
             summary_lines.append("\n**Stopped:** " + report["error"])
             if any(r.get("restriction") for r in report["results"]):
                 summary_lines.append(
-                    "\n**Instagram-side restriction:** No automatic retry was made. "
-                    "Daily live activity should remain paused until the account "
-                    "can follow normally from the Instagram app."
+                    "\n**Instagram-side restriction:** No automatic retry was made "
+                    "during this session. Future scheduled sessions can also fail "
+                    "if Instagram continues limiting follow/like activity. "
+                    "Check your account in the Instagram app."
                 )
         summary_lines.append(
             "\nUnconfirmed writes are not retried. Missing posts do not "

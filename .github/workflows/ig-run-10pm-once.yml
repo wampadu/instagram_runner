@@ -1,0 +1,50 @@
+name: One-time manual 10pm Instagram live trigger
+on:
+  push:
+    paths:
+      - '.github/workflows/ig-run-10pm-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: instagram-one-account
+  cancel-in-progress: false
+jobs:
+  one-live-10pm-session:
+    name: One-time 10PM #like4like 20-pair session
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout current code
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned client
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Offline verification
+        run: python -m unittest -v test_instagram_schedule test_instagram_run_guard test_instagram_cycle test_instagram_web_recent_probe test_instagram_web_recent
+      - name: Live follow+like session on one hashtag
+        env:
+          IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
+          IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ig-report"
+          python -m scripts.manual_instagram_actions \
+            --hashtag like4like \
+            --target-count 20 \
+            --single-hashtag \
+            --max-pages 3 \
+            --output-dir "$RUNNER_TEMP/ig-report"
+      - name: Upload detailed outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-one-time-10pm-${{ github.run_id }}
+          path: ${{ runner.temp }}/ig-report/
+          if-no-files-found: warn
+          retention-days: 14

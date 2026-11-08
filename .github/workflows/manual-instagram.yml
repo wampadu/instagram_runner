@@ -4,7 +4,6 @@ name: 'Instagram Automated — Five Toronto Sessions'
 # Two UTC cron hours for each slot cover EDT and EST. The DST-inapplicable
 # trigger is skipped before any Instagram access.
 # Maximum 20 confirmed NEW follow + like pairs per run, one hashtag only.
-# No IG_ENABLE_DAILY switch.
 on:
   schedule:
     # 10 PM Toronto (02:00 UTC EDT / 03:00 UTC EST, following UTC date)

@@ -175,8 +175,18 @@ def execute_single_engagement(client, code, tag, expected_user=None):
             return result, False
         result["follow"] = "confirmed"
     except Exception as exc:
-        result["follow"] = "uncertain"
-        result["error"] = "Follow outcome uncertain (" + type(exc).__name__ + ")."
+        kind = type(exc).__name__
+        if kind == "FeedbackRequired":
+            result["follow"] = "blocked"
+            result["restriction"] = "instagram_action_restriction"
+            result["error"] = (
+                "Instagram rejected the follow (FeedbackRequired). "
+                "Stop automated follows and review the account in Instagram. "
+                "Do not retry while restricted."
+            )
+        else:
+            result["follow"] = "uncertain"
+            result["error"] = "Follow outcome uncertain (" + kind + ")."
         return result, False
 
     try:
@@ -189,8 +199,18 @@ def execute_single_engagement(client, code, tag, expected_user=None):
         result["status"] = "confirmed"
         return result, True
     except Exception as exc:
-        result["like"] = "uncertain"
-        result["error"] = "Like outcome uncertain (" + type(exc).__name__ + ")."
+        kind = type(exc).__name__
+        if kind == "FeedbackRequired":
+            result["like"] = "blocked"
+            result["restriction"] = "instagram_action_restriction"
+            result["error"] = (
+                "Instagram rejected the like (FeedbackRequired). "
+                "Stop automated likes and review the account in Instagram. "
+                "Do not retry while restricted."
+            )
+        else:
+            result["like"] = "uncertain"
+            result["error"] = "Like outcome uncertain (" + kind + ")."
         return result, False
 def fetch_feed_candidates(session_path, hashtag, max_pages=2):
     """Get verified hashtag posts; do not silently treat fetch errors as zero."""
@@ -287,8 +307,8 @@ def run(args):
                         if outcome.get("error"):
                             batch["status"] = "unconfirmed_write"
                             raise SafeStop(
-                                "One follow or like was not confirmed for #" + tag +
-                                "; stopped without replaying the action."
+                                "Action stopped on #" + tag + ": " +
+                                outcome["error"]
                             )
                         if succeeded:
                             progress_in_pass += 1
@@ -352,7 +372,8 @@ def run(args):
             f"- Confirmed new follows: {report['confirmed_follows']}",
             f"- Confirmed new likes: {report['confirmed_likes']}",
             f"- Skipped: {report['skipped']}",
-            f"- Cooldowns taken: {len(report['cooldowns'])}", "",
+            f"- Cooldowns taken: {len(report['cooldowns'])}",
+            f"- Restriction detected: {'yes' if any(r.get('restriction') for r in report['results']) else 'no'}", "",
             "| Pass | Hashtag | Target | New follows | New likes | Candidates | Status |",
             "|---:|---|---:|---:|---:|---:|---|",
         ]
@@ -370,6 +391,12 @@ def run(args):
             )
         if report["error"]:
             summary_lines.append("\n**Stopped:** " + report["error"])
+            if any(r.get("restriction") for r in report["results"]):
+                summary_lines.append(
+                    "\n**Instagram-side restriction:** No automatic retry was made. "
+                    "Daily live activity should remain paused until the account "
+                    "can follow normally from the Instagram app."
+                )
         summary_lines.append(
             "\nUnconfirmed writes are not retried. Missing posts do not "
             "advance the count."

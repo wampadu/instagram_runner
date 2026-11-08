@@ -241,14 +241,18 @@ def run(args):
             raise SafeStop("Target count must be between 1 and 100.")
         if not TAG.fullmatch(args.hashtag):
             raise SafeStop("Invalid starting hashtag.")
-        current_pool = [args.hashtag] + [
-            tag for tag in HASHTAG_POOL if tag != args.hashtag
-        ]
+        # Fixed daily sessions must never spill into another session's tag.
+        # Existing multi-tag mode remains available for other callers.
+        single_hashtag = getattr(args, "single_hashtag", False)
+        current_pool = (
+            [args.hashtag] if single_hashtag
+            else [args.hashtag] + [tag for tag in HASHTAG_POOL if tag != args.hashtag]
+        )
         with private_session_path() as session_path:
             client = make_client(session_path)
             seen_posts, seen_authors = set(), set()
             # A finite limit prevents repeated polling when no useful posts remain.
-            for pass_number in range(1, 6):
+            for pass_number in range(1, 2 if single_hashtag else 6):
                 if report["confirmed_likes"] >= count:
                     break
                 progress_in_pass = 0
@@ -419,6 +423,10 @@ def run(args):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--hashtag", default="followforfollow")
+    p.add_argument(
+        "--single-hashtag", action="store_true",
+        help="Limit the entire run to exactly the supplied hashtag"
+    )
     p.add_argument("--target-count", type=int, default=2)
     p.add_argument("--max-pages", type=int, choices=(1, 2, 3), default=3)
     p.add_argument("--output-dir", default="")

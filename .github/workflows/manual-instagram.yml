@@ -1,20 +1,40 @@
-name: 'Instagram Automated — Loop and Engagement'
+name: 'Instagram Automated — Five Toronto Sessions'
 
-# Daily schedule retained, but live scheduled actions paused after Instagram FeedbackRequired.
-# To resume after manually verifying Instagram account activity is permitted,
-# create repo variable IG_ENABLE_DAILY with value true. Manual dispatch remains available.
-# Toronto 9 AM schedule remains DST-aware.
+# Five daily local Toronto sessions, not four: 5 AM, 9 AM, 3 PM, 6 PM, 10 PM.
+# Two UTC cron hours for each slot cover EDT and EST. The DST-inapplicable
+# trigger is skipped before any Instagram access.
+# Maximum 20 confirmed NEW follow + like pairs per run, one hashtag only.
+# No IG_ENABLE_DAILY switch.
 on:
   schedule:
+    # 10 PM Toronto (02:00 UTC EDT / 03:00 UTC EST, following UTC date)
+    - cron: '0 2 * * *'
+    - cron: '0 3 * * *'
+    # 5 AM Toronto
+    - cron: '0 9 * * *'
+    - cron: '0 10 * * *'
+    # 9 AM Toronto
     - cron: '0 13 * * *'
     - cron: '0 14 * * *'
+    # 3 PM Toronto
+    - cron: '0 19 * * *'
+    - cron: '0 20 * * *'
+    # 6 PM Toronto
+    - cron: '0 22 * * *'
+    - cron: '0 23 * * *'
   workflow_dispatch:
     inputs:
-      hashtag:
-        description: 'Override starting hashtag (optional)'
-        required: false
-        type: string
-        default: 'followforfollow'
+      slot:
+        description: 'Manually run exactly one Toronto slot/hashtag (20 pairs)'
+        required: true
+        type: choice
+        options:
+          - 5am
+          - 9am
+          - 3pm
+          - 6pm
+          - 10pm
+        default: 5am
 
 permissions:
   contents: read
@@ -24,68 +44,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  automated-run:
-    name: Cycle hashtags and engage target count
+  scheduled-session:
+    name: One hashtag, maximum 20 new follows + likes
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
     steps:
-      - name: Select Toronto 9 AM run
-        id: schedule_window
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          CRON_EXPRESSION: ${{ github.event.schedule }}
-          IG_ENABLE_DAILY: ${{ vars.IG_ENABLE_DAILY || 'false' }}
-        run: |
-          python - <<'PY'
-          from datetime import datetime, timedelta
-          from zoneinfo import ZoneInfo
-          import os
-          toronto = datetime.now(ZoneInfo("America/Toronto"))
-          hour_utc = 13 if toronto.dst() != timedelta(0) else 14
-          scheduled = (
-              os.environ["EVENT_NAME"] == "schedule" and
-              os.environ.get("CRON_EXPRESSION") == f"0 {hour_utc} * * *"
-          )
-          manually_run = os.environ["EVENT_NAME"] == "workflow_dispatch"
-          daily_enabled = os.environ["IG_ENABLE_DAILY"].strip().lower() == "true"
-          should_run = manually_run or (scheduled and daily_enabled)
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              print("run=" + str(should_run).lower(), file=out)
-          if scheduled and not daily_enabled:
-              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-                  print("### Daily Instagram actions paused", file=out)
-                  print("The account encountered `FeedbackRequired` (Instagram action restriction).", file=out)
-                  print("No live follows or likes were attempted. When Instagram allows follows again, set Actions variable `IG_ENABLE_DAILY=true` to resume.", file=out)
-          print("Toronto date:", toronto.strftime("%Y-%m-%d %Z"),
-                "daily enabled:", daily_enabled, "processing:", should_run)
-          PY
       - name: Checkout repository
-        if: steps.schedule_window.outputs.run == 'true'
         uses: actions/checkout@v4
       - name: Install Python
-        if: steps.schedule_window.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install pinned Instagram client
-        if: steps.schedule_window.outputs.run == 'true'
-        run: |
-          python -m pip install --disable-pip-version-check --no-input -r requirements.txt
-      - name: Offline tests
-        if: steps.schedule_window.outputs.run == 'true'
-        run: |
-          python -m unittest -v test_instagram_web_recent_probe test_instagram_web_recent test_instagram_cycle
-      - name: Execute engagement cycle
-        if: steps.schedule_window.outputs.run == 'true'
-        id: instagram
-        continue-on-error: true
+      - name: Determine one local Toronto session and its hashtag
+        id: session
         env:
-          # Confirmed NEW follow+like pairs; defaults to two when unset.
-          TARGET_COUNT: ${{ vars.IG_LIKE_FOLLOW || '2' }}
-          IG_HASHTAG: ${{ inputs.hashtag || 'followforfollow' }}
+          CRON_EXPRESSION: ${{ github.event.schedule }}
+          MANUAL_SLOT: ${{ inputs.slot || '5am' }}
+        run: python -m scripts.instagram_schedule
+      - name: Install pinned Instagram client
+        if: steps.session.outputs.run == 'true'
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Offline verification
+        if: steps.session.outputs.run == 'true'
+        run: python -m unittest -v test_instagram_schedule test_instagram_cycle test_instagram_web_recent_probe test_instagram_web_recent
+      - name: Follow and like at most 20 NEW authors/posts from one hashtag
+        if: steps.session.outputs.run == 'true'
+        env:
+          IG_HASHTAG: ${{ steps.session.outputs.hashtag }}
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
           IG_SESSION_GZIP_B64: ${{ secrets.IG_SESSION_GZIP_B64 }}
         run: |
@@ -93,19 +81,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ig-report"
           python -m scripts.manual_instagram_actions \
             --hashtag "$IG_HASHTAG" \
-            --target-count "$TARGET_COUNT" \
+            --target-count 20 \
+            --single-hashtag \
             --max-pages 3 \
             --output-dir "$RUNNER_TEMP/ig-report"
-      - name: Publish result JSON and Markdown
-        if: always() && steps.schedule_window.outputs.run == 'true'
+      - name: Publish outcome even if Instagram blocks an action
+        if: always() && steps.session.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: instagram-automated-results-${{ github.run_id }}
+          name: instagram-session-${{ steps.session.outputs.slot }}-${{ github.run_id }}
           path: ${{ runner.temp }}/ig-report/
           if-no-files-found: warn
           retention-days: 14
-      - name: Reflect Instagram result in job status
-        if: steps.schedule_window.outputs.run == 'true' && steps.instagram.outcome == 'failure'
-        run: |
-          echo 'Instagram follow/like was not completed. Read the Instagram engagement cycle Summary and results.json artifact for the actual cause (e.g. FeedbackRequired restriction). No automatic write retry was performed.' >&2
-          exit 1

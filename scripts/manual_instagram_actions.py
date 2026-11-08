@@ -239,6 +239,8 @@ def run(args):
     try:
         if not isinstance(count, int) or not 1 <= count <= 100:
             raise SafeStop("Target count must be between 1 and 100.")
+        if getattr(args, "single_hashtag", False) and count > 20:
+            raise SafeStop("A single-hashtag scheduled session cannot exceed 20 pairs.")
         if not TAG.fullmatch(args.hashtag):
             raise SafeStop("Invalid starting hashtag.")
         # Fixed daily sessions must never spill into another session's tag.

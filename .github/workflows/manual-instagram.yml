@@ -107,5 +107,5 @@ jobs:
       - name: Reflect Instagram result in job status
         if: steps.schedule_window.outputs.run == 'true' && steps.instagram.outcome == 'failure'
         run: |
-          echo 'Instagram workflow processing failed.' >&2
+          echo 'Instagram follow/like was not completed. Read the Instagram engagement cycle Summary and results.json artifact for the actual cause (e.g. FeedbackRequired restriction). No automatic write retry was performed.' >&2
           exit 1

@@ -1,6 +1,9 @@
 name: 'Instagram Automated — Loop and Engagement'
 
-# Runs at 9 AM Toronto daily (DST-aware) and accepts manual dispatch.
+# Daily schedule retained, but live scheduled actions paused after Instagram FeedbackRequired.
+# To resume after manually verifying Instagram account activity is permitted,
+# create repo variable IG_ENABLE_DAILY with value true. Manual dispatch remains available.
+# Toronto 9 AM schedule remains DST-aware.
 on:
   schedule:
     - cron: '0 13 * * *'
@@ -34,6 +37,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           CRON_EXPRESSION: ${{ github.event.schedule }}
+          IG_ENABLE_DAILY: ${{ vars.IG_ENABLE_DAILY || 'false' }}
         run: |
           python - <<'PY'
           from datetime import datetime, timedelta
@@ -45,11 +49,18 @@ jobs:
               os.environ["EVENT_NAME"] == "schedule" and
               os.environ.get("CRON_EXPRESSION") == f"0 {hour_utc} * * *"
           )
-          should_run = os.environ["EVENT_NAME"] == "workflow_dispatch" or scheduled
+          manually_run = os.environ["EVENT_NAME"] == "workflow_dispatch"
+          daily_enabled = os.environ["IG_ENABLE_DAILY"].strip().lower() == "true"
+          should_run = manually_run or (scheduled and daily_enabled)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               print("run=" + str(should_run).lower(), file=out)
+          if scheduled and not daily_enabled:
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+                  print("### Daily Instagram actions paused", file=out)
+                  print("The account encountered `FeedbackRequired` (Instagram action restriction).", file=out)
+                  print("No live follows or likes were attempted. When Instagram allows follows again, set Actions variable `IG_ENABLE_DAILY=true` to resume.", file=out)
           print("Toronto date:", toronto.strftime("%Y-%m-%d %Z"),
-                "processing:", should_run)
+                "daily enabled:", daily_enabled, "processing:", should_run)
           PY
       - name: Checkout repository
         if: steps.schedule_window.outputs.run == 'true'

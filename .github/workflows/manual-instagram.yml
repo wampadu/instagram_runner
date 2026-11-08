@@ -1,30 +1,36 @@
-name: 'Instagram Automated — Five Toronto Sessions'
+name: Instagram — Five Toronto Sessions
 
-# Five daily local Toronto sessions, not four: 5 AM, 9 AM, 3 PM, 6 PM, 10 PM.
-# Two UTC cron hours for each slot cover EDT and EST. The DST-inapplicable
-# trigger is skipped before any Instagram access.
-# Maximum 20 confirmed NEW follow + like pairs per run, one hashtag only.
+# The first GitHub cron run is deliberately away from minute 00, where GitHub
+# may drop scheduled jobs during high load. :36 is a second trigger ONLY if the
+# :11 trigger never materialized. A read-only Actions history guard makes
+# double engagement a no-op when both triggers arrive.
+# Each entry is timezone-aware, no custom UTC DST math is needed.
 on:
   schedule:
-    # 10 PM Toronto (02:00 UTC EDT / 03:00 UTC EST, following UTC date)
-    - cron: '0 2 * * *'
-    - cron: '0 3 * * *'
-    # 5 AM Toronto
-    - cron: '0 9 * * *'
-    - cron: '0 10 * * *'
-    # 9 AM Toronto
-    - cron: '0 13 * * *'
-    - cron: '0 14 * * *'
-    # 3 PM Toronto
-    - cron: '0 19 * * *'
-    - cron: '0 20 * * *'
-    # 6 PM Toronto
-    - cron: '0 22 * * *'
-    - cron: '0 23 * * *'
+    - cron: '11 5 * * *'
+      timezone: 'America/Toronto'
+    - cron: '36 5 * * *'
+      timezone: 'America/Toronto'
+    - cron: '11 9 * * *'
+      timezone: 'America/Toronto'
+    - cron: '36 9 * * *'
+      timezone: 'America/Toronto'
+    - cron: '11 15 * * *'
+      timezone: 'America/Toronto'
+    - cron: '36 15 * * *'
+      timezone: 'America/Toronto'
+    - cron: '11 18 * * *'
+      timezone: 'America/Toronto'
+    - cron: '36 18 * * *'
+      timezone: 'America/Toronto'
+    - cron: '11 22 * * *'
+      timezone: 'America/Toronto'
+    - cron: '36 22 * * *'
+      timezone: 'America/Toronto'
   workflow_dispatch:
     inputs:
       slot:
-        description: 'Manually run exactly one Toronto slot/hashtag (20 pairs)'
+        description: 'Manually run one Toronto hashtag slot (at most 20 pairs)'
         required: true
         type: choice
         options:
@@ -37,14 +43,15 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: instagram-manual-one-account
+  group: instagram-one-account
   cancel-in-progress: false
 
 jobs:
   scheduled-session:
-    name: One hashtag, maximum 20 new follows + likes
+    name: Maximum 20 new follow+like pairs on one hashtag
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
@@ -53,24 +60,38 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Install Python
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Determine one local Toronto session and its hashtag
+
+      - name: Select intended Toronto session
         id: session
         env:
           CRON_EXPRESSION: ${{ github.event.schedule }}
           MANUAL_SLOT: ${{ inputs.slot || '5am' }}
         run: python -m scripts.instagram_schedule
+
+      - name: Prevent duplicate live session when fallback cron fires
+        id: guard
+        if: steps.session.outputs.run == 'true'
+        env:
+          SLOT: ${{ steps.session.outputs.slot }}
+          LOCAL_DATE: ${{ steps.session.outputs.local_date }}
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.instagram_run_guard
+
       - name: Install pinned Instagram client
-        if: steps.session.outputs.run == 'true'
+        if: steps.session.outputs.run == 'true' && steps.guard.outputs.run == 'true'
         run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+
       - name: Offline verification
-        if: steps.session.outputs.run == 'true'
-        run: python -m unittest -v test_instagram_schedule test_instagram_cycle test_instagram_web_recent_probe test_instagram_web_recent
-      - name: Follow and like at most 20 NEW authors/posts from one hashtag
-        if: steps.session.outputs.run == 'true'
+        if: steps.session.outputs.run == 'true' && steps.guard.outputs.run == 'true'
+        run: python -m unittest -v test_instagram_schedule test_instagram_run_guard test_instagram_cycle test_instagram_web_recent_probe test_instagram_web_recent
+
+      - name: Follow and like up to 20 NEW posts on this hashtag
+        if: steps.session.outputs.run == 'true' && steps.guard.outputs.run == 'true'
         env:
           IG_HASHTAG: ${{ steps.session.outputs.hashtag }}
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
@@ -84,8 +105,9 @@ jobs:
             --single-hashtag \
             --max-pages 3 \
             --output-dir "$RUNNER_TEMP/ig-report"
-      - name: Publish outcome even if Instagram blocks an action
-        if: always() && steps.session.outputs.run == 'true'
+
+      - name: Save result even if Instagram refuses an action
+        if: always() && steps.session.outputs.run == 'true' && steps.guard.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: instagram-session-${{ steps.session.outputs.slot }}-${{ github.run_id }}

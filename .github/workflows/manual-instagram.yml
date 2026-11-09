@@ -1,4 +1,5 @@
 name: Instagram — Five Toronto Sessions
+run-name: 'Instagram cron: ${{ github.event.schedule || inputs.slot }}'
 
 # The first GitHub cron run is deliberately away from minute 00, where GitHub
 # may drop scheduled jobs during high load. :36 is a second trigger ONLY if the

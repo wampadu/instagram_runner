@@ -1,0 +1,33 @@
+name: Verify delayed GitHub cron routing without Instagram writes
+on:
+  push:
+    paths:
+      - '.github/workflows/verify-schedule-late-trigger-once.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate real delayed schedule timestamps and GitHub deduplication
+        run: |
+          python -m unittest -v test_instagram_schedule test_instagram_run_guard
+          python -m py_compile scripts/instagram_schedule.py scripts/instagram_run_guard.py
+      - name: Simulate GitHub's scheduled 10PM event and inspect session outputs
+        env:
+          GITHUB_EVENT_NAME: schedule
+          CRON_EXPRESSION: '11 22 * * *'
+        run: |
+          python -m scripts.instagram_schedule
+          grep -q '^run=true$' "$GITHUB_OUTPUT"
+          grep -q '^slot=10pm$' "$GITHUB_OUTPUT"
+          grep -q '^hashtag=like4like$' "$GITHUB_OUTPUT"
+      - name: Run all related offline Instagram tests
+        run: |
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+          python -m unittest -v test_instagram_schedule test_instagram_run_guard test_instagram_cycle test_instagram_web_recent_probe test_instagram_web_recent

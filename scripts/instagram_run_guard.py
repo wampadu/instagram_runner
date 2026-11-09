@@ -1,45 +1,61 @@
-"""Avoid duplicate scheduled Instagram sessions when GitHub's backup cron fires.
+"""Prevent duplicate follows when primary and backup GitHub crons both fire.
 
-A read-only GitHub Actions API lookup elects the earliest created scheduled
-workflow run for each Toronto local date and slot. Duplicate runs exit before
-the login, the Instagram session, or any follow/like calls. Fails closed if
-the API cannot be read, rather than guessing and risking double engagement.
+GitHub's run-name embeds the cron expression, so its REST API run history can
+identify each intended Toronto slot even if the runner starts hours late.
+A scheduled run is elected only once for its local slot/date. If GitHub
+history is unavailable or the cron cannot be identified, fail closed visibly.
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import os
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
 
-TORONTO = ZoneInfo("America/Toronto")
-SLOT_HOURS = {"5am": 5, "9am": 9, "3pm": 15, "6pm": 18, "10pm": 22}
+from scripts.instagram_schedule import SLOTS, TORONTO, occurrence_for_cron, parse_cron
+
+RUN_TITLE_PREFIX = "Instagram cron: "
+
+
+def get_run_slot_and_date(run):
+    """Infer cron slot and Toronto scheduled date from GitHub run metadata."""
+    if run.get("event") != "schedule":
+        return None
+    title = run.get("display_title") or ""
+    if not title.startswith(RUN_TITLE_PREFIX):
+        return None
+    cron = title[len(RUN_TITLE_PREFIX):].strip()
+    parsed = parse_cron(cron)
+    if not parsed:
+        return None
+    try:
+        created = datetime.fromisoformat(
+            run["created_at"].replace("Z", "+00:00")
+        )
+        scheduled = occurrence_for_cron(cron, created)
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return None
+    minute, hour = parsed
+    return SLOTS[hour][0], scheduled.strftime("%Y-%m-%d")
 
 
 def same_slot(run, slot, local_date):
-    """Whether the run was created within this local slot's 2h45m window."""
-    if run.get("event") != "schedule":
-        return False
-    try:
-        created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
-        created = created.astimezone(TORONTO)
-        start = datetime.fromisoformat(local_date).replace(
-            tzinfo=TORONTO, hour=SLOT_HOURS[slot]
-        )
-    except (KeyError, ValueError, TypeError):
-        return False
-    return start <= created < start + timedelta(hours=2, minutes=45)
+    return get_run_slot_and_date(run) == (slot, local_date)
 
 
 def should_execute(run_id, slot, local_date, runs):
-    """Elect only the first scheduled run in the slot, regardless of status."""
+    """Elect the earliest created scheduled run from this slot's cron triggers."""
+    current = next((r for r in runs if str(r.get("id")) == str(run_id)), None)
+    if current is None:
+        raise ValueError("Current scheduled run absent from GitHub history")
+    if not same_slot(current, slot, local_date):
+        raise ValueError(
+            "Current run has no matching scheduled cron and Toronto date "
+            "(check run-name metadata)"
+        )
     relevant = [r for r in runs if same_slot(r, slot, local_date)]
-    candidate_ids = {str(r.get("id")) for r in relevant}
-    if str(run_id) not in candidate_ids:
-        raise ValueError("Current scheduled run absent from GitHub run history")
-    first = min(relevant, key=lambda r: (r["created_at"], int(r["id"])))
-    return str(first["id"]) == str(run_id), first["id"]
+    elected = min(relevant, key=lambda r: (r["created_at"], int(r["id"])))
+    return str(elected["id"]) == str(run_id), elected["id"]
 
 
 def fetch_runs(repo, token):
@@ -55,7 +71,6 @@ def fetch_runs(repo, token):
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "instagram-scheduled-session-guard",
     })
-    # Read-only retries for transient GitHub REST errors are safe.
     for attempt in range(3):
         try:
             with urlopen(req, timeout=20) as response:
@@ -66,18 +81,19 @@ def fetch_runs(repo, token):
             return runs
         except (HTTPError, URLError, TimeoutError) as exc:
             if attempt == 2:
-                raise RuntimeError("Could not check prior GitHub scheduled runs") from exc
+                raise RuntimeError("Could not check GitHub scheduled run history") from exc
             time.sleep(2)
-    raise RuntimeError("Could not check prior GitHub scheduled runs")
+    raise RuntimeError("Could not check GitHub scheduled run history")
 
 
 def main():
     event = os.environ.get("GITHUB_EVENT_NAME")
     slot = os.environ.get("SLOT")
     local_date = os.environ.get("LOCAL_DATE")
-    if slot not in SLOT_HOURS:
+    if slot not in {value[0] for value in SLOTS.values()}:
         raise SystemExit("Invalid Toronto Instagram slot")
     if event == "workflow_dispatch":
+        # Manual dispatch is explicit. It doesn't count as a scheduled backup.
         allowed, reason = True, "manual_dispatch"
     elif event == "schedule":
         try:
@@ -93,18 +109,24 @@ def main():
                 else f"duplicate_of_run_{elected_id}"
             )
         except (ValueError, KeyError, RuntimeError) as exc:
-            print("Guard stopped: cannot safely determine first scheduled run:",
-                  type(exc).__name__, str(exc), flush=True)
+            print(
+                "Schedule guard failed; Instagram actions NOT attempted:",
+                type(exc).__name__, str(exc), flush=True
+            )
             raise SystemExit(2)
     else:
-        allowed, reason = False, "not_manual_or_scheduled"
-
-    print(f"Guard: slot={slot} date={local_date} "
-          f"allow_live_actions={allowed} reason={reason}", flush=True)
+        raise SystemExit("Unknown event for scheduled Instagram workflow")
+    print(
+        f"Guard: slot={slot} date={local_date} "
+        f"allow_live_actions={allowed} reason={reason}", flush=True
+    )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         output.write(f"run={str(allowed).lower()}\n")
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-        summary.write(f"Schedule deduplication: **{reason}**\n")
+        summary.write(
+            f"**GitHub schedule deduplication:** {reason}. "
+            f"Instagram actions {'authorized' if allowed else 'skipped'}.\n"
+        )
 
 
 if __name__ == "__main__":

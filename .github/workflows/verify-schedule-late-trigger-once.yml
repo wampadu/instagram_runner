@@ -1,4 +1,5 @@
 name: Verify delayed GitHub cron routing without Instagram writes
+run-name: "Instagram cron: ${{ github.event.schedule || '11 5 * * *' }}"
 on:
   push:
     paths:

@@ -1,4 +1,4 @@
-name: Instagram — Five Toronto Sessions
+name: Instagram — Five Toronto Sessions (Paused)
 run-name: 'Instagram cron: ${{ github.event.schedule || inputs.slot }}'
 
 # The first GitHub cron run is deliberately away from minute 00, where GitHub
@@ -6,28 +6,9 @@ run-name: 'Instagram cron: ${{ github.event.schedule || inputs.slot }}'
 # :11 trigger never materialized. A read-only Actions history guard makes
 # double engagement a no-op when both triggers arrive.
 # Each entry is timezone-aware, no custom UTC DST math is needed.
+# PAUSED at the user's request: no automatic schedule triggers.
+# Resume only after explicit user instruction; keep manual dispatch available.
 on:
-  schedule:
-    - cron: '11 5 * * *'
-      timezone: 'America/Toronto'
-    - cron: '36 5 * * *'
-      timezone: 'America/Toronto'
-    - cron: '11 9 * * *'
-      timezone: 'America/Toronto'
-    - cron: '36 9 * * *'
-      timezone: 'America/Toronto'
-    - cron: '11 15 * * *'
-      timezone: 'America/Toronto'
-    - cron: '36 15 * * *'
-      timezone: 'America/Toronto'
-    - cron: '11 18 * * *'
-      timezone: 'America/Toronto'
-    - cron: '36 18 * * *'
-      timezone: 'America/Toronto'
-    - cron: '11 22 * * *'
-      timezone: 'America/Toronto'
-    - cron: '36 22 * * *'
-      timezone: 'America/Toronto'
   workflow_dispatch:
     inputs:
       slot:

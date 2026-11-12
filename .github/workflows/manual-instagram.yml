@@ -1,13 +1,9 @@
 name: Instagram — Five Toronto Sessions (Paused)
-run-name: 'Instagram cron: ${{ github.event.schedule || inputs.slot }}'
+run-name: 'Instagram manual session: ${{ inputs.slot }}'
 
-# The first GitHub cron run is deliberately away from minute 00, where GitHub
-# may drop scheduled jobs during high load. :36 is a second trigger ONLY if the
-# :11 trigger never materialized. A read-only Actions history guard makes
-# double engagement a no-op when both triggers arrive.
-# Each entry is timezone-aware, no custom UTC DST math is needed.
 # PAUSED at the user's request: no automatic schedule triggers.
-# Resume only after explicit user instruction; keep manual dispatch available.
+# Resume scheduled engagement only after explicit user instruction.
+# The manual Run workflow option remains available.
 on:
   workflow_dispatch:
     inputs:
